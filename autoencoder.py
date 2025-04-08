@@ -89,6 +89,7 @@ class Autoencoder(nn.Module):
 
 def train_autoencoder(database_folder, save_folder, num_epochs=20, batch_size=16, embedding_dim=256, encoder_type="basic"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
     transform = transforms.Compose([
         transforms.Grayscale(num_output_channels=1),
         transforms.Resize((224, 224)),
