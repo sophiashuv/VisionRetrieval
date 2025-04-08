@@ -6,6 +6,7 @@ import torch
 import numpy as np
 import pandas as pd
 from torchvision import datasets, transforms, models
+from torch.utils.tensorboard import SummaryWriter
 from torch import nn, optim
 from PIL import Image
 import matplotlib.pyplot as plt
@@ -93,7 +94,7 @@ def train_autoencoder(database_folder, save_folder, num_epochs=20, batch_size=16
         transforms.Resize((224, 224)),
         transforms.ToTensor()
     ])
-
+    writer = SummaryWriter(log_dir=os.path.join(save_folder, f"autoencoder_{encoder_type}_tensorboard"))
     autoencoder = Autoencoder(embedding_dim, encoder_type).to(device)
     criterion = nn.MSELoss(reduction='mean')
     optimizer = optim.Adam(autoencoder.parameters(), lr=0.001)
@@ -118,14 +119,20 @@ def train_autoencoder(database_folder, save_folder, num_epochs=20, batch_size=16
                 sample_images = images[:5]
                 reconstructed_images = decoded[:5]
 
-        print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {epoch_loss / len(dataloader):.4f}")
+        avg_loss = epoch_loss / len(dataloader)
+        print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {avg_loss:.4f}")
+        writer.add_scalar("Loss/train", avg_loss, epoch + 1)
 
         if (epoch + 1) % 5 == 0:
             save_reconstructions(sample_images, reconstructed_images, save_folder, epoch + 1, encoder_type)
 
+            img_grid = torch.cat([sample_images.cpu(), reconstructed_images.cpu()], dim=0)
+            writer.add_images("Reconstruction", img_grid, global_step=epoch + 1)
+
+    writer.close()
+
     model_name = f"autoencoder_{encoder_type}.pth"
     torch.save(autoencoder.state_dict(), os.path.join(save_folder, model_name))
-
     return autoencoder, transform, device
 
 

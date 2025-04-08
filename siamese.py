@@ -10,6 +10,7 @@ import numpy as np
 from PIL import Image
 from torchvision import datasets, transforms, models
 from torch.utils.data import Dataset, DataLoader
+from torch.utils.tensorboard import SummaryWriter
 
 from autoencoder import Autoencoder
 
@@ -155,7 +156,6 @@ def get_model_suffix(encoder_type, encoder_path):
 def train_siamese_network(database_folder, save_folder, embedding_dim=256, num_epochs=20, batch_size=16,
                           learning_rate=0.001, encoder_type="basic", encoder_path=None, model_suffix="basic"):
 
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     transform = transforms.Compose([
@@ -176,6 +176,9 @@ def train_siamese_network(database_folder, save_folder, embedding_dim=256, num_e
     criterion = ContrastiveLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
+    log_dir = os.path.join(save_folder, f"siamese_tensorboard_{model_suffix}")
+    writer = SummaryWriter(log_dir=log_dir)
+
     for epoch in range(num_epochs):
         total_loss = 0
         for img1, img2, label in dataloader:
@@ -186,7 +189,12 @@ def train_siamese_network(database_folder, save_folder, embedding_dim=256, num_e
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
-        print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss / len(dataloader):.4f}")
+
+        avg_loss = total_loss / len(dataloader)
+        print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {avg_loss:.4f}")
+        writer.add_scalar("Loss/train", avg_loss, epoch + 1)
+
+    writer.close()
 
     os.makedirs(save_folder, exist_ok=True)
     torch.save(model.state_dict(), os.path.join(save_folder, f"siamese_model_{model_suffix}.pth"))
@@ -222,7 +230,6 @@ def extract_embeddings(model, transform, device, database_folder, save_folder, e
     index = faiss.IndexFlatL2(embedding_dim)
     index.add(embeddings)
 
-    # Save index and metadata
     faiss.write_index(index, os.path.join(save_folder, f"siamese_faiss_{model_suffix}.index"))
     pd.DataFrame({"index": range(len(image_paths)), "image_path": image_paths}).to_csv(
         os.path.join(save_folder, f"siamese_metadata_{model_suffix}.csv"), index=False
