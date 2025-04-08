@@ -5,14 +5,13 @@ import faiss
 import torch
 import numpy as np
 import pandas as pd
-from torchvision import datasets, transforms
+from torchvision import datasets, transforms, models
 from torch import nn, optim
 from PIL import Image
 import matplotlib.pyplot as plt
 
 
 def ensure_subfolder_exists(database_folder, default_class_folder):
-    """Ensures that images are inside a labeled folder structure."""
     if not any(os.path.isdir(os.path.join(database_folder, d)) for d in os.listdir(database_folder)):
         os.makedirs(default_class_folder, exist_ok=True)
         for filename in os.listdir(database_folder):
@@ -22,18 +21,53 @@ def ensure_subfolder_exists(database_folder, default_class_folder):
 
 
 class Autoencoder(nn.Module):
-    def __init__(self, embedding_dim=256):
+    def __init__(self, embedding_dim=256, encoder_type="basic"):
         super(Autoencoder, self).__init__()
-        self.encoder = nn.Sequential(
-            nn.Conv2d(1, 32, 3, stride=2, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, 3, stride=2, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(64, 128, 3, stride=2, padding=1),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.Linear(128 * 28 * 28, embedding_dim)
-        )
+        self.encoder_type = encoder_type
+        self.embedding_dim = embedding_dim
+
+        if encoder_type == "basic":
+            self.encoder = nn.Sequential(
+                nn.Conv2d(1, 32, 3, stride=2, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(32, 64, 3, stride=2, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(64, 128, 3, stride=2, padding=1),
+                nn.ReLU(),
+                nn.Flatten(),
+                nn.Linear(128 * 28 * 28, embedding_dim)
+            )
+            encoder_output_size = embedding_dim
+
+        else:
+            if encoder_type == "resnet":
+                model = models.resnet18(pretrained=True)
+                model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+                self.feature_extractor = nn.Sequential(*list(model.children())[:-1])  # Remove FC layer
+                encoder_output_size = model.fc.in_features
+
+            elif encoder_type == "mobilenet":
+                model = models.mobilenet_v2(pretrained=True)
+                model.features[0][0] = nn.Conv2d(1, 32, kernel_size=3, stride=2, padding=1, bias=False)
+                self.feature_extractor = model.features
+                encoder_output_size = 1280
+
+            elif encoder_type == "efficientnet":
+                model = models.efficientnet_b0(pretrained=True)
+                model.features[0][0] = nn.Conv2d(1, 32, kernel_size=3, stride=2, padding=1, bias=False)
+                self.feature_extractor = model.features
+                encoder_output_size = 1280
+
+            else:
+                raise ValueError(f"Unsupported encoder type: {encoder_type}")
+
+            self.encoder = nn.Sequential(
+                self.feature_extractor,
+                nn.AdaptiveAvgPool2d((1, 1)),
+                nn.Flatten(),
+                nn.Linear(encoder_output_size, embedding_dim)
+            )
+
         self.decoder = nn.Sequential(
             nn.Linear(embedding_dim, 128 * 28 * 28),
             nn.ReLU(),
@@ -52,10 +86,7 @@ class Autoencoder(nn.Module):
         return encoded, decoded
 
 
-
-
-def train_autoencoder(database_folder, save_folder, num_epochs=20, batch_size=16, embedding_dim=256):
-    """Trains the autoencoder and saves the model."""
+def train_autoencoder(database_folder, save_folder, num_epochs=20, batch_size=16, embedding_dim=256, encoder_type="basic"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     transform = transforms.Compose([
         transforms.Grayscale(num_output_channels=1),
@@ -63,7 +94,7 @@ def train_autoencoder(database_folder, save_folder, num_epochs=20, batch_size=16
         transforms.ToTensor()
     ])
 
-    autoencoder = Autoencoder(embedding_dim).to(device)
+    autoencoder = Autoencoder(embedding_dim, encoder_type).to(device)
     criterion = nn.MSELoss(reduction='mean')
     optimizer = optim.Adam(autoencoder.parameters(), lr=0.001)
     dataset = datasets.ImageFolder(root=database_folder, transform=transform)
@@ -90,12 +121,15 @@ def train_autoencoder(database_folder, save_folder, num_epochs=20, batch_size=16
         print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {epoch_loss / len(dataloader):.4f}")
 
         if (epoch + 1) % 5 == 0:
-            save_reconstructions(sample_images, reconstructed_images, save_folder, epoch + 1)
+            save_reconstructions(sample_images, reconstructed_images, save_folder, epoch + 1, encoder_type)
 
-    torch.save(autoencoder.state_dict(), os.path.join(save_folder, "autoencoder.pth"))
+    model_name = f"autoencoder_{encoder_type}.pth"
+    torch.save(autoencoder.state_dict(), os.path.join(save_folder, model_name))
+
     return autoencoder, transform, device
 
-def save_reconstructions(originals, reconstructions, save_path, epoch):
+
+def save_reconstructions(originals, reconstructions, save_path, epoch, encoder_type):
     originals = originals.cpu().numpy()
     reconstructions = reconstructions.cpu().detach().numpy()
 
@@ -110,13 +144,13 @@ def save_reconstructions(originals, reconstructions, save_path, epoch):
         axes[1, i].set_title("Reconstructed")
 
     plt.tight_layout()
-    out_path = os.path.join(save_path, f"reconstruction_epoch_{epoch}.png")
+    out_path = os.path.join(save_path, f"reconstruction_{encoder_type}_epoch_{epoch}.png")
     plt.savefig(out_path)
     plt.close()
     print(f"Saved reconstruction preview to: {out_path}")
 
-def extract_embeddings(autoencoder, transform, device, database_folder, save_folder, embedding_dim=256):
-    """Extracts image embeddings and stores them in a FAISS index."""
+
+def extract_embeddings(autoencoder, transform, device, database_folder, save_folder, embedding_dim=256, encoder_type="basic"):
     image_paths = []
     embeddings = []
 
@@ -142,29 +176,29 @@ def extract_embeddings(autoencoder, transform, device, database_folder, save_fol
         print("No valid embeddings found. Exiting.")
         return
 
-    # Convert list to NumPy array
     embeddings = np.array(embeddings, dtype=np.float32)
 
-    # Create FAISS index
     d = embedding_dim
-    index = faiss.IndexFlatL2(d)  # L2-based FAISS search
+    index = faiss.IndexFlatL2(d)
     index.add(embeddings)
 
-    # Save FAISS index
-    index_file = os.path.join(save_folder, "autoencoder_faiss.index")
+    index_file = os.path.join(save_folder, f"autoencoder_{encoder_type}_faiss.index")
     faiss.write_index(index, index_file)
 
-    # Save metadata
+    metadata_file = os.path.join(save_folder, f"autoencoder_{encoder_type}_metadata.csv")
     metadata_df = pd.DataFrame({"index": range(len(image_paths)), "image_path": image_paths})
-    metadata_df.to_csv(os.path.join(save_folder, "autoencoder_metadata.csv"), index=False)
+    metadata_df.to_csv(metadata_file, index=False)
 
     print(f"Embeddings saved in {index_file}")
-    print(f"Metadata saved in {save_folder}/autoencoder_metadata.csv")
+    print(f"Metadata saved in {metadata_file}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train an autoencoder and extract image embeddings.")
     parser.add_argument("--base_folder", help="Folder containing images", required=True)
+    parser.add_argument("--encoder_type", type=str, default="basic",
+                        choices=["basic", "resnet", "mobilenet", "efficientnet"],
+                        help="Type of encoder to use in the autoencoder")
     parser.add_argument("--save_folder", help="Folder to save model and embeddings", required=True)
     parser.add_argument("--num_epochs", type=int, default=20, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training")
@@ -174,7 +208,8 @@ if __name__ == "__main__":
     default_class_folder = os.path.join(args.base_folder, "unlabeled")
     ensure_subfolder_exists(args.base_folder, default_class_folder)
 
-    autoencoder, transform, device = train_autoencoder(args.base_folder, args.save_folder, args.num_epochs,
-                                                       args.batch_size, args.embedding_dim)
+    autoencoder, transform, device = train_autoencoder(args.base_folder, args.save_folder,
+                                                       args.num_epochs, args.batch_size,
+                                                       args.embedding_dim, args.encoder_type)
 
     extract_embeddings(autoencoder, transform, device, args.base_folder, args.save_folder, args.embedding_dim)

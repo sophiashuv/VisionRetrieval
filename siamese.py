@@ -8,8 +8,10 @@ import faiss
 import pandas as pd
 import numpy as np
 from PIL import Image
-from torchvision import datasets, transforms
+from torchvision import datasets, transforms, models
 from torch.utils.data import Dataset, DataLoader
+
+from autoencoder import Autoencoder
 
 
 class SiameseDataset(Dataset):
@@ -53,18 +55,21 @@ class SiameseDataset(Dataset):
 
 
 class SiameseNetwork(nn.Module):
-    def __init__(self, embedding_dim):
+    def __init__(self, encoder=None, embedding_dim=256):
         super(SiameseNetwork, self).__init__()
-        self.cnn = nn.Sequential(
-                nn.Conv2d(1, 32, 3, stride=2, padding=1),  # -> [32, 14, 14]
+        if encoder is not None:
+            self.cnn = encoder
+        else:
+            self.cnn = nn.Sequential(
+                nn.Conv2d(1, 32, 3, stride=2, padding=1),
                 nn.ReLU(),
-                nn.Conv2d(32, 64, 3, stride=2, padding=1),  # -> [64, 7, 7]
+                nn.Conv2d(32, 64, 3, stride=2, padding=1),
                 nn.ReLU(),
-                nn.Conv2d(64, 128, 3, stride=2, padding=1),  # -> [128, 4, 4]
+                nn.Conv2d(64, 128, 3, stride=2, padding=1),
                 nn.ReLU(),
                 nn.Flatten(),
                 nn.Linear(128 * 28 * 28, embedding_dim)
-        )
+            )
 
     def forward_once(self, x):
         return self.cnn(x)
@@ -84,7 +89,73 @@ class ContrastiveLoss(nn.Module):
         return loss.mean()
 
 
-def train_siamese_network(database_folder, save_folder, embedding_dim=256, num_epochs=20, batch_size=16, learning_rate=0.001):
+def build_encoder(encoder_type, embedding_dim, encoder_path, device):
+    if encoder_type == "autoencoder":
+        autoencoder = Autoencoder(embedding_dim=embedding_dim, encoder_type=encoder_type).to(device)
+        autoencoder.load_state_dict(torch.load(encoder_path, map_location=device))
+        autoencoder.eval()
+        return autoencoder.encoder
+
+    elif encoder_type == "resnet":
+        model = models.resnet18(pretrained=True)
+        model.conv1 = torch.nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        encoder = torch.nn.Sequential(*list(model.children())[:-1])
+        return torch.nn.Sequential(
+            encoder,
+            torch.nn.AdaptiveAvgPool2d((1, 1)),
+            torch.nn.Flatten(),
+            torch.nn.Linear(model.fc.in_features, embedding_dim)
+        )
+
+    elif encoder_type == "mobilenet":
+        model = models.mobilenet_v2(pretrained=True)
+        model.features[0][0] = torch.nn.Conv2d(1, 32, kernel_size=3, stride=2, padding=1, bias=False)
+        encoder = model.features
+        return torch.nn.Sequential(
+            encoder,
+            torch.nn.AdaptiveAvgPool2d((1, 1)),
+            torch.nn.Flatten(),
+            torch.nn.Linear(1280, embedding_dim)
+        )
+
+    elif encoder_type == "efficientnet":
+        model = models.efficientnet_b0(pretrained=True)
+        model.features[0][0] = torch.nn.Conv2d(1, 32, kernel_size=3, stride=2, padding=1, bias=False)
+        encoder = model.features
+        return torch.nn.Sequential(
+            encoder,
+            torch.nn.AdaptiveAvgPool2d((1, 1)),
+            torch.nn.Flatten(),
+            torch.nn.Linear(1280, embedding_dim)
+        )
+
+    elif encoder_type == "basic":
+        return torch.nn.Sequential(
+            torch.nn.Conv2d(1, 32, 3, stride=2, padding=1),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(32, 64, 3, stride=2, padding=1),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(64, 128, 3, stride=2, padding=1),
+            torch.nn.ReLU(),
+            torch.nn.Flatten(),
+            torch.nn.Linear(128 * 28 * 28, embedding_dim)
+        )
+
+    else:
+        raise ValueError(f"Unknown encoder type: {encoder_type}")
+
+
+def get_model_suffix(encoder_type, encoder_path):
+    if encoder_type == "autoencoder" and encoder_path:
+        model_name = os.path.splitext(os.path.basename(encoder_path))[0]
+        return f"{encoder_type}_{model_name}"
+    return encoder_type
+
+
+def train_siamese_network(database_folder, save_folder, embedding_dim=256, num_epochs=20, batch_size=16,
+                          learning_rate=0.001, encoder_type="basic", encoder_path=None, model_suffix="basic"):
+
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     transform = transforms.Compose([
@@ -98,9 +169,13 @@ def train_siamese_network(database_folder, save_folder, embedding_dim=256, num_e
     siamese_dataset = SiameseDataset(image_folder_dataset, transform)
     dataloader = DataLoader(siamese_dataset, shuffle=True, batch_size=batch_size)
 
-    model = SiameseNetwork(embedding_dim).to(device)
+    encoder = build_encoder(encoder_type, embedding_dim, encoder_path, device)
+    print(f"Using encoder: {encoder_type}")
+
+    model = SiameseNetwork(encoder=encoder, embedding_dim=embedding_dim).to(device)
     criterion = ContrastiveLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
     for epoch in range(num_epochs):
         total_loss = 0
         for img1, img2, label in dataloader:
@@ -114,11 +189,11 @@ def train_siamese_network(database_folder, save_folder, embedding_dim=256, num_e
         print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss / len(dataloader):.4f}")
 
     os.makedirs(save_folder, exist_ok=True)
-    torch.save(model.state_dict(), os.path.join(save_folder, "siamese_model.pth"))
+    torch.save(model.state_dict(), os.path.join(save_folder, f"siamese_model_{model_suffix}.pth"))
     return model, transform, device
 
 
-def extract_embeddings(model, transform, device, database_folder, save_folder, embedding_dim=256):
+def extract_embeddings(model, transform, device, database_folder, save_folder, embedding_dim=256, model_suffix="basic"):
     model.eval()
     embeddings = []
     image_paths = []
@@ -148,9 +223,9 @@ def extract_embeddings(model, transform, device, database_folder, save_folder, e
     index.add(embeddings)
 
     # Save index and metadata
-    faiss.write_index(index, os.path.join(save_folder, "siamese_faiss.index"))
+    faiss.write_index(index, os.path.join(save_folder, f"siamese_faiss_{model_suffix}.index"))
     pd.DataFrame({"index": range(len(image_paths)), "image_path": image_paths}).to_csv(
-        os.path.join(save_folder, "siamese_metadata.csv"), index=False
+        os.path.join(save_folder, f"siamese_metadata_{model_suffix}.csv"), index=False
     )
     print(f"Saved FAISS index and metadata to {save_folder}")
 
@@ -159,19 +234,29 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train a Siamese network and extract embeddings.")
     parser.add_argument("--base_folder", required=True, help="Dataset base folder")
     parser.add_argument("--save_folder", required=True, help="Folder to save model and embeddings")
+    parser.add_argument("--encoder_type", type=str, default="basic",
+                        choices=["basic", "autoencoder", "resnet", "mobilenet", "efficientnet"],
+                        help="Type of encoder to use")
+    parser.add_argument("--encoder_path", type=str, default=None,
+                        help="Path to pretrained encoder.pth weights")
     parser.add_argument("--num_epochs", type=int, default=30)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--learning_rate", type=float, default=0.001)
     parser.add_argument("--embedding_dim", type=int, default=256)
     args = parser.parse_args()
 
+    model_suffix = get_model_suffix(args.encoder_type, args.encoder_path)
+
     model, transform, device = train_siamese_network(
         database_folder=args.base_folder,
         save_folder=args.save_folder,
-        embedding_dim = args.embedding_dim,
+        embedding_dim=args.embedding_dim,
         num_epochs=args.num_epochs,
         batch_size=args.batch_size,
-        learning_rate=args.learning_rate
+        learning_rate=args.learning_rate,
+        encoder_type=args.encoder_type,
+        encoder_path=args.encoder_path,
+        model_suffix=model_suffix
     )
 
     extract_embeddings(
@@ -180,5 +265,7 @@ if __name__ == "__main__":
         device=device,
         database_folder=args.base_folder,
         save_folder=args.save_folder,
-        embedding_dim=args.embedding_dim
+        embedding_dim=args.embedding_dim,
+        model_suffix=model_suffix
     )
+
