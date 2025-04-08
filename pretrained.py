@@ -41,7 +41,7 @@ def initialize_model(model_name):
     model = models_dict[model_name]
     model.eval()
     model = model.to(device)
-    model = torch.nn.Sequential(*list(model.children())[:-1])  # Remove classification
+    model = torch.nn.Sequential(*list(model.children())[:-1])
     return model, transform
 
 
@@ -70,14 +70,16 @@ def compute_embeddings(base_folder, save_folder, model_name):
     index = faiss.IndexFlatL2(d)
     index.add(embeddings)
 
-    index_file = os.path.join(save_folder, f"{model_name}_faiss.index")
-    faiss.write_index(index, index_file)
+    model_prefix = f"pretrained_{model_name}"
+    index_file = os.path.join(save_folder, f"{model_prefix}_faiss.index")
+    metadata_file = os.path.join(save_folder, f"{model_prefix}_metadata.csv")
 
+    faiss.write_index(index, index_file)
     metadata_df = pd.DataFrame({"index": range(len(image_paths)), "image_path": image_paths})
-    metadata_df.to_csv(os.path.join(save_folder, f"{model_name}_metadata.csv"), index=False)
+    metadata_df.to_csv(metadata_file, index=False)
 
     print(f"Embeddings saved: {index_file}")
-    print(f"Metadata saved: {save_folder}/{model_name}_metadata.csv")
+    print(f"Metadata saved: {metadata_file}")
 
 
 if __name__ == "__main__":

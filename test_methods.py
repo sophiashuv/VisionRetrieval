@@ -13,7 +13,7 @@ from torchvision import transforms
 from autoencoder import Autoencoder
 from siamese import SiameseNetwork
 from hash import dhash, phash, hash_to_bitvector
-from finetuning import extract_features, initialize_model
+from pretrained import extract_features, initialize_model
 
 
 def load_faiss_index_and_metadata(folder, method, model_name=None):
@@ -21,8 +21,8 @@ def load_faiss_index_and_metadata(folder, method, model_name=None):
         index_path = os.path.join(folder, "autoencoder_faiss.index")
         metadata_path = os.path.join(folder, "autoencoder_metadata.csv")
     elif method == "siamese":
-        index_path = os.path.join(folder, "siamese_faiss.index")
-        metadata_path = os.path.join(folder, "siamese_metadata.csv")
+        index_path = os.path.join(folder, "siamese_pr_faiss.index")
+        metadata_path = os.path.join(folder, "siamese_pr_metadata.csv")
     elif method in ["dhash", "phash"]:
         index_path = os.path.join(folder, f"{method}_faiss.index")
         metadata_path = os.path.join(folder, f"{method}_metadata.csv")
@@ -40,7 +40,18 @@ def load_faiss_index_and_metadata(folder, method, model_name=None):
     return index, metadata
 
 
-def evaluate_retrieval(query_folder, database_folder, save_folder, method, model_name=None):
+def get_method_prefix(method, model_name=None):
+    if method == "finetuned" and model_name:
+        return f"pretrained_{model_name}"
+    elif method == "siamese" and model_name:
+        return f"siamese_{model_name}"
+    elif method == "autoencoder" and model_name:
+        return f"autoencoder_{model_name}"
+    else:
+        return method
+
+
+def evaluate_retrieval(query_folder, database_folder, save_folder, method, model_name=None, method_prefix=""):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     if method == "autoencoder":
@@ -53,10 +64,13 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, model
             transforms.ToTensor()
         ])
     elif method == "siamese":
-        siamese_model = SiameseNetwork(256).to(device)
+        autoencoder = Autoencoder(embedding_dim=256)
+        encoder = autoencoder.encoder
+        siamese_model = SiameseNetwork(encoder=encoder).to(device)
         siamese_model.load_state_dict(
-            torch.load(os.path.join(database_folder, "siamese_model.pth"), map_location=device))
+            torch.load(os.path.join(database_folder, "siamese_pr_model.pth"), map_location=device))
         siamese_model.eval()
+
         transform = transforms.Compose([
             transforms.Grayscale(num_output_channels=1),
             transforms.Resize((224, 224)),
@@ -149,8 +163,7 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, model
 
                     output_data.append({
                         "filename": filename,
-                        "method": method,
-                        "model": model_name if model_name else "N/A",
+                        "method": method_prefix,
                         "query_folder": subfolder,
                         "top_5": top_5,
                         "top1_match": top_5_folders[0] == subfolder,
@@ -175,13 +188,15 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, model
         ])
 
     df = pd.DataFrame(results, columns=[
-        "Method", "Model", "Class", "Top-1 Acc", "Top-5 Acc", "Avg Time (s)", "Timestamp"
+        "Method", "Class", "Top-1 Acc", "Top-5 Acc", "Avg Time (s)", "Timestamp"
     ])
+    df["Method"] = method_prefix
 
     csv_path = os.path.join(save_folder, "retrieval_results.csv")
     df.to_csv(csv_path, mode='a', header=not os.path.exists(csv_path), index=False)
 
-    json_path = os.path.join(save_folder, f"{method}_{model_name if model_name else 'none'}_retrieval_results.json")
+    json_path = os.path.join(save_folder, f"{method_prefix}_retrieval_results.json")
+
     with open(json_path, "w") as json_file:
         json.dump(output_data, json_file, indent=4)
 
@@ -200,5 +215,13 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", choices=["resnet", "efficientnet", "mobilenet"], default=None,
                         help="Model name for finetuned method")
     args = parser.parse_args()
+    method_prefix = get_method_prefix(args.method, args.model_name)
 
-    evaluate_retrieval(args.query_folder, args.database_folder, args.save_folder, args.method, args.model_name)
+    evaluate_retrieval(
+        query_folder=args.query_folder,
+        database_folder=args.database_folder,
+        save_folder=args.save_folder,
+        method=args.method,
+        model_name=args.model_name,
+        method_prefix=method_prefix
+    )
