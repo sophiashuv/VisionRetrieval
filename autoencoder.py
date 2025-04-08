@@ -100,8 +100,10 @@ def train_autoencoder(database_folder, save_folder, num_epochs=20, batch_size=16
     optimizer = optim.Adam(autoencoder.parameters(), lr=0.001)
     dataset = datasets.ImageFolder(root=database_folder, transform=transform)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    print(f"Dataset loaded from '{database_folder}': {len(dataset)} images found.")
 
     for epoch in range(num_epochs):
+        print(epoch)
         epoch_loss = 0
         sample_images = None
         reconstructed_images = None
@@ -158,6 +160,8 @@ def save_reconstructions(originals, reconstructions, save_path, epoch, encoder_t
 
 
 def extract_embeddings(autoencoder, transform, device, database_folder, save_folder, embedding_dim=256, encoder_type="basic"):
+    autoencoder.to(device)
+    autoencoder.eval()
     image_paths = []
     embeddings = []
 
