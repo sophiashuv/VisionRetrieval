@@ -87,7 +87,8 @@ class Autoencoder(nn.Module):
         return encoded, decoded
 
 
-def train_autoencoder(database_folder, save_folder, num_epochs=20, batch_size=16, embedding_dim=256, encoder_type="basic"):
+def train_autoencoder(database_folder, save_folder, num_epochs=20, batch_size=16, embedding_dim=256,
+                      encoder_type="basic", early_stopping_patience=5):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     transform = transforms.Compose([
@@ -103,8 +104,13 @@ def train_autoencoder(database_folder, save_folder, num_epochs=20, batch_size=16
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
     print(f"Dataset loaded from '{database_folder}': {len(dataset)} images found.")
 
+    best_loss = float("inf")
+    patience_counter = 0
+    model_name = f"autoencoder_{encoder_type}.pth"
+    model_path = os.path.join(save_folder, model_name)
+
     for epoch in range(num_epochs):
-        print(epoch)
+        autoencoder.train()
         epoch_loss = 0
         sample_images = None
         reconstructed_images = None
@@ -128,15 +134,25 @@ def train_autoencoder(database_folder, save_folder, num_epochs=20, batch_size=16
 
         if (epoch + 1) % 5 == 0:
             save_reconstructions(sample_images, reconstructed_images, save_folder, epoch + 1, encoder_type)
-
             img_grid = torch.cat([sample_images.cpu(), reconstructed_images.cpu()], dim=0)
             writer.add_images("Reconstruction", img_grid, global_step=epoch + 1)
 
-    writer.close()
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+            patience_counter = 0
+            torch.save(autoencoder.state_dict(), model_path)
+            print(f"Saved new best model at epoch {epoch + 1}")
+        else:
+            patience_counter += 1
+            print(f"No improvement. Patience: {patience_counter}/{early_stopping_patience}")
 
-    model_name = f"autoencoder_{encoder_type}.pth"
-    torch.save(autoencoder.state_dict(), os.path.join(save_folder, model_name))
+        if patience_counter >= early_stopping_patience:
+            print(f"Early stopping at epoch {epoch + 1}")
+            break
+
+    writer.close()
     return autoencoder, transform, device
+
 
 
 def save_reconstructions(originals, reconstructions, save_path, epoch, encoder_type):
@@ -212,16 +228,29 @@ if __name__ == "__main__":
                         choices=["basic", "resnet", "mobilenet", "efficientnet"],
                         help="Type of encoder to use in the autoencoder")
     parser.add_argument("--save_folder", help="Folder to save model and embeddings", required=True)
-    parser.add_argument("--num_epochs", type=int, default=20, help="Number of training epochs")
+    parser.add_argument("--num_epochs", type=int, default=100, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training")
     parser.add_argument("--embedding_dim", type=int, default=256, help="Size of embedding vector")
+    parser.add_argument("--es_patience", type=int, default=5, help="Number of epochs to wait before early stopping")
+
     args = parser.parse_args()
 
     default_class_folder = os.path.join(args.base_folder, "unlabeled")
     ensure_subfolder_exists(args.base_folder, default_class_folder)
 
-    autoencoder, transform, device = train_autoencoder(args.base_folder, args.save_folder,
-                                                       args.num_epochs, args.batch_size,
-                                                       args.embedding_dim, args.encoder_type)
+    autoencoder, transform, device = train_autoencoder(
+        database_folder=args.base_folder,
+        save_folder=args.save_folder,
+        num_epochs=args.num_epochs,
+        batch_size=args.batch_size,
+        embedding_dim=args.embedding_dim,
+        encoder_type=args.encoder_type,
+        early_stopping_patience=args.es_patience
+    )
 
-    extract_embeddings(autoencoder, transform, device, args.base_folder, args.save_folder, args.embedding_dim)
+    extract_embeddings(autoencoder,
+                       transform,
+                       device,
+                       args.base_folder,
+                       args.save_folder,
+                       args.embedding_dim)

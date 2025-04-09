@@ -154,7 +154,8 @@ def get_model_suffix(encoder_type, encoder_path):
 
 
 def train_siamese_network(database_folder, save_folder, embedding_dim=256, num_epochs=20, batch_size=16,
-                          learning_rate=0.001, encoder_type="basic", encoder_path=None, model_suffix="basic"):
+                          learning_rate=0.001, encoder_type="basic", encoder_path=None, model_suffix="basic",
+                          early_stopping_patience=5):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -179,8 +180,14 @@ def train_siamese_network(database_folder, save_folder, embedding_dim=256, num_e
     log_dir = os.path.join(save_folder, f"siamese_tensorboard_{model_suffix}")
     writer = SummaryWriter(log_dir=log_dir)
 
+    best_loss = float("inf")
+    patience_counter = 0
+    best_model_path = os.path.join(save_folder, f"siamese_model_{model_suffix}.pth")
+
     for epoch in range(num_epochs):
+        model.train()
         total_loss = 0
+
         for img1, img2, label in dataloader:
             img1, img2, label = img1.to(device), img2.to(device), label.to(device)
             optimizer.zero_grad()
@@ -194,10 +201,21 @@ def train_siamese_network(database_folder, save_folder, embedding_dim=256, num_e
         print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {avg_loss:.4f}")
         writer.add_scalar("Loss/train", avg_loss, epoch + 1)
 
-    writer.close()
+        # Early stopping logic
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+            patience_counter = 0
+            torch.save(model.state_dict(), best_model_path)
+            print(f"Saved new best model at epoch {epoch+1}")
+        else:
+            patience_counter += 1
+            print(f"No improvement. Patience: {patience_counter}/{early_stopping_patience}")
 
-    os.makedirs(save_folder, exist_ok=True)
-    torch.save(model.state_dict(), os.path.join(save_folder, f"siamese_model_{model_suffix}.pth"))
+        if patience_counter >= early_stopping_patience:
+            print(f"Early stopping at epoch {epoch+1}")
+            break
+
+    writer.close()
     return model, transform, device
 
 
@@ -246,10 +264,11 @@ if __name__ == "__main__":
                         help="Type of encoder to use")
     parser.add_argument("--encoder_path", type=str, default=None,
                         help="Path to pretrained encoder.pth weights")
-    parser.add_argument("--num_epochs", type=int, default=30)
+    parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--learning_rate", type=float, default=0.001)
     parser.add_argument("--embedding_dim", type=int, default=256)
+    parser.add_argument("--es_patience", type=int, default=5, help="Number of epochs to wait before early stopping")
     args = parser.parse_args()
 
     model_suffix = get_model_suffix(args.encoder_type, args.encoder_path)
@@ -263,8 +282,10 @@ if __name__ == "__main__":
         learning_rate=args.learning_rate,
         encoder_type=args.encoder_type,
         encoder_path=args.encoder_path,
-        model_suffix=model_suffix
+        model_suffix=model_suffix,
+        early_stopping_patience=args.es_patience
     )
+
 
     extract_embeddings(
         model=model,
