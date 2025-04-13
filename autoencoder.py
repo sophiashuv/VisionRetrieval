@@ -98,6 +98,7 @@ def train_autoencoder(database_folder, save_folder, num_epochs=20, batch_size=16
     ])
     writer = SummaryWriter(log_dir=os.path.join(save_folder, f"autoencoder_{encoder_type}_tensorboard"))
     autoencoder = Autoencoder(embedding_dim, encoder_type).to(device)
+    print(f"Total trainable parameters: {sum(p.numel() for p in autoencoder.parameters() if p.requires_grad):,}")
     criterion = nn.MSELoss(reduction='mean')
     optimizer = optim.Adam(autoencoder.parameters(), lr=0.001)
     dataset = datasets.ImageFolder(root=database_folder, transform=transform)

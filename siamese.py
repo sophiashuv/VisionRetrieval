@@ -11,6 +11,7 @@ from PIL import Image
 from torchvision import datasets, transforms, models
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from torchsummary import summary
 
 from autoencoder import Autoencoder
 
@@ -174,6 +175,7 @@ def train_siamese_network(database_folder, save_folder, embedding_dim=256, num_e
     print(f"Using encoder: {encoder_type}")
 
     model = SiameseNetwork(encoder=encoder, embedding_dim=embedding_dim).to(device)
+    print(f"Total trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
     criterion = ContrastiveLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
