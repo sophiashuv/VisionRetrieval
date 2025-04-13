@@ -92,7 +92,7 @@ class ContrastiveLoss(nn.Module):
 
 def build_encoder(encoder_type, embedding_dim, encoder_path, device):
     if encoder_path:
-        autoencoder = Autoencoder(embedding_dim=embedding_dim, encoder_type=encoder_type).to(device)
+        autoencoder = Autoencoder(embedding_dim=embedding_dim, encoder_type=encoder_type if encoder_type != "autoencoder" else "basic").to(device)
         autoencoder.load_state_dict(torch.load(encoder_path, map_location=device))
         autoencoder.eval()
         return autoencoder.encoder
