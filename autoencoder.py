@@ -254,4 +254,5 @@ if __name__ == "__main__":
                        device,
                        args.base_folder,
                        args.save_folder,
-                       args.embedding_dim)
+                       args.embedding_dim,
+                       args.encoder_type)
