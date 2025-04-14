@@ -149,7 +149,7 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
 def get_model_suffix(encoder_type, encoder_path):
     if encoder_type == "autoencoder" or encoder_path:
         model_name = os.path.splitext(os.path.basename(encoder_path))[0]
-        return f"{encoder_type}_{model_name}"
+        return f"{model_name}"
     return encoder_type
 
 
