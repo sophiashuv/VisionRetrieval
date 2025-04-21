@@ -9,7 +9,7 @@ import pandas as pd
 import numpy as np
 from PIL import Image
 from torchvision import datasets, transforms, models
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 from torch.utils.tensorboard import SummaryWriter
 
 from autoencoder import Autoencoder
@@ -48,7 +48,7 @@ class SiameseDataset(Dataset):
         return (
             self.transform(anchor_image),
             self.transform(positive_image),
-            torch.tensor([label], dtype=torch.float32)
+            torch.tensor(label, dtype=torch.float32)  # <-- fix here
         )
 
     def __len__(self):
@@ -91,12 +91,13 @@ class ContrastiveLoss(nn.Module):
 
 
 def build_encoder(encoder_type, embedding_dim, encoder_path, device):
-    if encoder_path:
-        autoencoder = Autoencoder(embedding_dim=embedding_dim, encoder_type=encoder_type if encoder_type != "autoencoder" else "basic").to(device)
+    if "autoencoder" in encoder_type:
+        _, encoder = encoder_type.split("_")
+        autoencoder = Autoencoder(embedding_dim=embedding_dim,
+                                  encoder_type=encoder).to(device)
         autoencoder.load_state_dict(torch.load(encoder_path, map_location=device))
         autoencoder.eval()
         return autoencoder.encoder
-
     elif encoder_type == "resnet":
         model = models.resnet18(pretrained=True)
         model.conv1 = torch.nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
@@ -146,15 +147,8 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
         raise ValueError(f"Unknown encoder type: {encoder_type}")
 
 
-def get_model_suffix(encoder_type, encoder_path):
-    if encoder_type == "autoencoder" or encoder_path:
-        model_name = os.path.splitext(os.path.basename(encoder_path))[0]
-        return f"{model_name}"
-    return encoder_type
-
-
 def train_siamese_network(database_folder, save_folder, embedding_dim=256, num_epochs=20, batch_size=16,
-                          learning_rate=0.001, encoder_type="basic", encoder_path=None, model_suffix="basic",
+                          learning_rate=0.001, encoder_type="basic", encoder_path=None,
                           early_stopping_patience=5):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -168,7 +162,13 @@ def train_siamese_network(database_folder, save_folder, embedding_dim=256, num_e
 
     image_folder_dataset = datasets.ImageFolder(root=database_folder)
     siamese_dataset = SiameseDataset(image_folder_dataset, transform)
-    dataloader = DataLoader(siamese_dataset, shuffle=True, batch_size=batch_size)
+
+    val_size = int(0.2 * len(siamese_dataset))
+    train_size = len(siamese_dataset) - val_size
+    train_dataset, val_dataset = random_split(siamese_dataset, [train_size, val_size])
+
+    train_loader = DataLoader(train_dataset, shuffle=True, batch_size=batch_size)
+    val_loader = DataLoader(val_dataset, shuffle=False, batch_size=batch_size)
 
     encoder = build_encoder(encoder_type, embedding_dim, encoder_path, device)
     print(f"Using encoder: {encoder_type}")
@@ -178,49 +178,73 @@ def train_siamese_network(database_folder, save_folder, embedding_dim=256, num_e
     criterion = ContrastiveLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    log_dir = os.path.join(save_folder, f"siamese_tensorboard_{model_suffix}")
+    log_dir = os.path.join(save_folder, f"siamese_tensorboard_{encoder_type}")
     writer = SummaryWriter(log_dir=log_dir)
 
     best_loss = float("inf")
     patience_counter = 0
-    best_model_path = os.path.join(save_folder, f"siamese_model_{model_suffix}.pth")
+    best_model_path = os.path.join(save_folder, f"siamese_{encoder_type}.pth")
 
     for epoch in range(num_epochs):
         model.train()
-        total_loss = 0
+        train_loss = 0
 
-        for img1, img2, label in dataloader:
+        for img1, img2, label in train_loader:
             img1, img2, label = img1.to(device), img2.to(device), label.to(device)
             optimizer.zero_grad()
             output1, output2 = model(img1, img2)
             loss = criterion(output1, output2, label)
             loss.backward()
             optimizer.step()
-            total_loss += loss.item()
+            train_loss += loss.item()
 
-        avg_loss = total_loss / len(dataloader)
-        print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {avg_loss:.4f}")
-        writer.add_scalar("Loss/train", avg_loss, epoch + 1)
+        avg_train_loss = train_loss / len(train_loader)
 
-        # Early stopping logic
-        if avg_loss < best_loss:
-            best_loss = avg_loss
+        # Validation
+        model.eval()
+        val_loss = 0
+        correct = 0
+        total = 0
+
+        with torch.no_grad():
+            for img1, img2, label in val_loader:
+                img1, img2, label = img1.to(device), img2.to(device), label.to(device)
+                output1, output2 = model(img1, img2)
+                loss = criterion(output1, output2, label)
+                val_loss += loss.item()
+
+                distances = torch.nn.functional.pairwise_distance(output1, output2)
+                preds = (distances < 0.5).float()
+                correct += (preds == label).sum().item()
+                total += label.size(0)
+
+        avg_val_loss = val_loss / len(val_loader)
+        accuracy = correct / total
+
+        print(f"Epoch [{epoch + 1}/{num_epochs}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Val Acc: {accuracy:.4f}")
+        writer.add_scalar("Loss/train", avg_train_loss, epoch + 1)
+        writer.add_scalar("Loss/val", avg_val_loss, epoch + 1)
+        writer.add_scalar("Accuracy/val", accuracy, epoch + 1)
+
+        if avg_val_loss < best_loss:
+            best_loss = avg_val_loss
             patience_counter = 0
             torch.save(model.state_dict(), best_model_path)
-            print(f"Saved new best model at epoch {epoch+1}")
+            print(f"Saved new best model at epoch {epoch + 1}")
         else:
             patience_counter += 1
             print(f"No improvement. Patience: {patience_counter}/{early_stopping_patience}")
 
         if patience_counter >= early_stopping_patience:
-            print(f"Early stopping at epoch {epoch+1}")
+            print(f"Early stopping at epoch {epoch + 1}")
             break
+
 
     writer.close()
     return model, transform, device
 
 
-def extract_embeddings(model, transform, device, database_folder, save_folder, embedding_dim=256, model_suffix="basic"):
+def extract_embeddings(model, transform, device, database_folder, save_folder, embedding_dim=256, encoder_type="basic"):
     model.eval()
     embeddings = []
     image_paths = []
@@ -249,9 +273,9 @@ def extract_embeddings(model, transform, device, database_folder, save_folder, e
     index = faiss.IndexFlatL2(embedding_dim)
     index.add(embeddings)
 
-    faiss.write_index(index, os.path.join(save_folder, f"siamese_faiss_{model_suffix}.index"))
+    faiss.write_index(index, os.path.join(save_folder, f"siamese_{encoder_type}_faiss.index"))
     pd.DataFrame({"index": range(len(image_paths)), "image_path": image_paths}).to_csv(
-        os.path.join(save_folder, f"siamese_metadata_{model_suffix}.csv"), index=False
+        os.path.join(save_folder, f"siamese_{encoder_type}metadata_.csv"), index=False
     )
     print(f"Saved FAISS index and metadata to {save_folder}")
 
@@ -261,7 +285,8 @@ if __name__ == "__main__":
     parser.add_argument("--base_folder", required=True, help="Dataset base folder")
     parser.add_argument("--save_folder", required=True, help="Folder to save model and embeddings")
     parser.add_argument("--encoder_type", type=str, default="basic",
-                        choices=["basic", "autoencoder", "resnet", "mobilenet", "efficientnet"],
+                        choices=["basic", "resnet", "mobilenet", "efficientnet", "autoencoder_basic",
+                                 "autoencoder_resnet", "autoencoder_mobilenet", "autoencoder_efficientnet"],
                         help="Type of encoder to use")
     parser.add_argument("--encoder_path", type=str, default=None,
                         help="Path to pretrained encoder.pth weights")
@@ -272,8 +297,6 @@ if __name__ == "__main__":
     parser.add_argument("--es_patience", type=int, default=5, help="Number of epochs to wait before early stopping")
     args = parser.parse_args()
 
-    model_suffix = get_model_suffix(args.encoder_type, args.encoder_path)
-
     model, transform, device = train_siamese_network(
         database_folder=args.base_folder,
         save_folder=args.save_folder,
@@ -283,7 +306,6 @@ if __name__ == "__main__":
         learning_rate=args.learning_rate,
         encoder_type=args.encoder_type,
         encoder_path=args.encoder_path,
-        model_suffix=model_suffix,
         early_stopping_patience=args.es_patience
     )
 
@@ -294,6 +316,6 @@ if __name__ == "__main__":
         database_folder=args.base_folder,
         save_folder=args.save_folder,
         embedding_dim=args.embedding_dim,
-        model_suffix=model_suffix
+        encoder_type=args.encoder_type
     )
 

@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from torchvision import datasets, transforms, models
 from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import DataLoader, random_split
 from torch import nn, optim
 from PIL import Image
 import matplotlib.pyplot as plt
@@ -102,7 +103,13 @@ def train_autoencoder(database_folder, save_folder, num_epochs=20, batch_size=16
     criterion = nn.MSELoss(reduction='mean')
     optimizer = optim.Adam(autoencoder.parameters(), lr=0.001)
     dataset = datasets.ImageFolder(root=database_folder, transform=transform)
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    val_size = int(0.2 * len(dataset))
+    train_size = len(dataset) - val_size
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
     print(f"Dataset loaded from '{database_folder}': {len(dataset)} images found.")
 
     best_loss = float("inf")
@@ -112,34 +119,53 @@ def train_autoencoder(database_folder, save_folder, num_epochs=20, batch_size=16
 
     for epoch in range(num_epochs):
         autoencoder.train()
-        epoch_loss = 0
-        sample_images = None
-        reconstructed_images = None
+        train_loss = 0
 
-        for batch_idx, (images, _) in enumerate(dataloader):
+        for images, _ in train_loader:
             images = images.to(device)
             optimizer.zero_grad()
-            encoded, decoded = autoencoder(images)
+            _, decoded = autoencoder(images)
             loss = criterion(decoded, images)
             loss.backward()
             optimizer.step()
-            epoch_loss += loss.item()
+            train_loss += loss.item()
 
-            if batch_idx == 0:
-                sample_images = images[:5]
-                reconstructed_images = decoded[:5]
+        avg_train_loss = train_loss / len(train_loader)
 
-        avg_loss = epoch_loss / len(dataloader)
-        print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {avg_loss:.4f}")
-        writer.add_scalar("Loss/train", avg_loss, epoch + 1)
+        # Validation
+        autoencoder.eval()
+        val_loss = 0
+        correct_pixels = 0
+        total_pixels = 0
+
+        with torch.no_grad():
+            for val_images, _ in val_loader:
+                val_images = val_images.to(device)
+                _, decoded = autoencoder(val_images)
+                loss = criterion(decoded, val_images)
+                val_loss += loss.item()
+
+                # Accuracy: count how many pixels are close enough
+                pred = decoded > 0.5
+                truth = val_images > 0.5
+                correct_pixels += torch.sum(pred == truth).item()
+                total_pixels += pred.numel()
+
+        avg_val_loss = val_loss / len(val_loader)
+        pixel_accuracy = correct_pixels / total_pixels
+
+        print(
+            f"Epoch [{epoch + 1}/{num_epochs}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Val Pixel Acc: {pixel_accuracy:.4f}")
+        writer.add_scalar("Loss/train", avg_train_loss, epoch + 1)
+        writer.add_scalar("Loss/val", avg_val_loss, epoch + 1)
+        writer.add_scalar("Accuracy/val", pixel_accuracy, epoch + 1)
 
         if (epoch + 1) % 5 == 0:
-            save_reconstructions(sample_images, reconstructed_images, save_folder, epoch + 1, encoder_type)
-            img_grid = torch.cat([sample_images.cpu(), reconstructed_images.cpu()], dim=0)
-            writer.add_images("Reconstruction", img_grid, global_step=epoch + 1)
+            save_reconstructions(val_images[:5], decoded[:5], save_folder, epoch + 1, encoder_type)
 
-        if avg_loss < best_loss:
-            best_loss = avg_loss
+        # Early Stopping based on validation loss
+        if avg_val_loss < best_loss:
+            best_loss = avg_val_loss
             patience_counter = 0
             torch.save(autoencoder.state_dict(), model_path)
             print(f"Saved new best model at epoch {epoch + 1}")
@@ -153,7 +179,6 @@ def train_autoencoder(database_folder, save_folder, num_epochs=20, batch_size=16
 
     writer.close()
     return autoencoder, transform, device
-
 
 
 def save_reconstructions(originals, reconstructions, save_path, epoch, encoder_type):
