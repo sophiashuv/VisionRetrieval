@@ -275,7 +275,7 @@ def extract_embeddings(model, transform, device, database_folder, save_folder, e
 
     faiss.write_index(index, os.path.join(save_folder, f"siamese_{encoder_type}_faiss.index"))
     pd.DataFrame({"index": range(len(image_paths)), "image_path": image_paths}).to_csv(
-        os.path.join(save_folder, f"siamese_{encoder_type}metadata_.csv"), index=False
+        os.path.join(save_folder, f"siamese_{encoder_type}_metadata.csv"), index=False
     )
     print(f"Saved FAISS index and metadata to {save_folder}")
 
