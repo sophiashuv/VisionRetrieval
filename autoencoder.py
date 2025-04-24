@@ -7,19 +7,22 @@ import numpy as np
 import pandas as pd
 from torchvision import datasets, transforms, models
 from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, random_split, ConcatDataset
 from torch import nn, optim
 from PIL import Image
 import matplotlib.pyplot as plt
 
 
-def ensure_subfolder_exists(database_folder, default_class_folder):
-    if not any(os.path.isdir(os.path.join(database_folder, d)) for d in os.listdir(database_folder)):
-        os.makedirs(default_class_folder, exist_ok=True)
-        for filename in os.listdir(database_folder):
-            file_path = os.path.join(database_folder, filename)
-            if filename.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".avif")):
-                shutil.move(file_path, os.path.join(default_class_folder, filename))
+def ensure_subfolder_exists(folders):
+    for database_folder in folders:
+        default_class_folder = os.path.join(database_folder, "unlabeled")
+        if not any(os.path.isdir(os.path.join(database_folder, d)) for d in os.listdir(database_folder)):
+            os.makedirs(default_class_folder, exist_ok=True)
+            for filename in os.listdir(database_folder):
+                file_path = os.path.join(database_folder, filename)
+                if filename.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".avif")):
+                    shutil.move(file_path, os.path.join(default_class_folder, filename))
+
 
 
 class Autoencoder(nn.Module):
@@ -30,7 +33,7 @@ class Autoencoder(nn.Module):
 
         if encoder_type == "basic":
             self.encoder = nn.Sequential(
-                nn.Conv2d(1, 32, 3, stride=2, padding=1),
+                nn.Conv2d(3, 32, 3, stride=2, padding=1),
                 nn.ReLU(),
                 nn.Conv2d(32, 64, 3, stride=2, padding=1),
                 nn.ReLU(),
@@ -88,21 +91,23 @@ class Autoencoder(nn.Module):
         return encoded, decoded
 
 
-def train_autoencoder(database_folder, save_folder, num_epochs=20, batch_size=16, embedding_dim=256,
+def train_autoencoder(database_folders, save_folder, num_epochs=20, batch_size=16, embedding_dim=256,
                       encoder_type="basic", early_stopping_patience=5):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     transform = transforms.Compose([
-        transforms.Grayscale(num_output_channels=1),
         transforms.Resize((224, 224)),
-        transforms.ToTensor()
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
     ])
     writer = SummaryWriter(log_dir=os.path.join(save_folder, f"autoencoder_{encoder_type}_tensorboard"))
     autoencoder = Autoencoder(embedding_dim, encoder_type).to(device)
     print(f"Total trainable parameters: {sum(p.numel() for p in autoencoder.parameters() if p.requires_grad):,}")
     criterion = nn.MSELoss(reduction='mean')
     optimizer = optim.Adam(autoencoder.parameters(), lr=0.001)
-    dataset = datasets.ImageFolder(root=database_folder, transform=transform)
+    datasets_list = [datasets.ImageFolder(root=folder, transform=transform) for folder in database_folders]
+    dataset = ConcatDataset(datasets_list)
     val_size = int(0.2 * len(dataset))
     train_size = len(dataset) - val_size
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
@@ -110,7 +115,7 @@ def train_autoencoder(database_folder, save_folder, num_epochs=20, batch_size=16
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    print(f"Dataset loaded from '{database_folder}': {len(dataset)} images found.")
+    print(f"Dataset loaded from {', '.join(database_folders)}: {len(dataset)} images found.")
 
     best_loss = float("inf")
     patience_counter = 0
@@ -202,29 +207,28 @@ def save_reconstructions(originals, reconstructions, save_path, epoch, encoder_t
     print(f"Saved reconstruction preview to: {out_path}")
 
 
-def extract_embeddings(autoencoder, transform, device, database_folder, save_folder, embedding_dim=256, encoder_type="basic"):
+def extract_embeddings(autoencoder, transform, device, database_folders, save_folder, embedding_dim=256, encoder_type="basic"):
     autoencoder.to(device)
     autoencoder.eval()
     image_paths = []
     embeddings = []
 
-    for class_folder in os.listdir(database_folder):
-        class_path = os.path.join(database_folder, class_folder)
-        if os.path.isdir(class_path):
-            for filename in os.listdir(class_path):
-                file_path = os.path.join(class_path, filename)
-                last_dir = os.path.basename(class_path)
-                img_path = os.path.join(last_dir, filename)
-                if filename.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".avif")):
-                    try:
-                        image = Image.open(file_path).convert("L")
-                        image = transform(image).unsqueeze(0).to(device)
-                        with torch.no_grad():
-                            features, _ = autoencoder(image)
-                        image_paths.append(file_path)
-                        embeddings.append(features.squeeze().cpu().numpy())
-                    except Exception as e:
-                        print(f"Error processing {filename}: {e}")
+    for database_folder in database_folders:
+        for class_folder in os.listdir(database_folder):
+            class_path = os.path.join(database_folder, class_folder)
+            if os.path.isdir(class_path):
+                for filename in os.listdir(class_path):
+                    file_path = os.path.join(class_path, filename)
+                    if filename.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".avif")):
+                        try:
+                            image = Image.open(file_path).convert("RGB")
+                            image = transform(image).unsqueeze(0).to(device)
+                            with torch.no_grad():
+                                features, _ = autoencoder(image)
+                            image_paths.append(file_path)
+                            embeddings.append(features.squeeze().cpu().numpy())
+                        except Exception as e:
+                            print(f"Error processing {filename}: {e}")
 
     if len(embeddings) == 0:
         print("No valid embeddings found. Exiting.")
@@ -249,7 +253,7 @@ def extract_embeddings(autoencoder, transform, device, database_folder, save_fol
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train an autoencoder and extract image embeddings.")
-    parser.add_argument("--base_folder", help="Folder containing images", required=True)
+    parser.add_argument("--base_folders", nargs='+', help="List of folders containing images", required=True)
     parser.add_argument("--encoder_type", type=str, default="basic",
                         choices=["basic", "resnet", "mobilenet", "efficientnet"],
                         help="Type of encoder to use in the autoencoder")
@@ -261,11 +265,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    default_class_folder = os.path.join(args.base_folder, "unlabeled")
-    ensure_subfolder_exists(args.base_folder, default_class_folder)
+    ensure_subfolder_exists(args.base_folders)
 
     autoencoder, transform, device = train_autoencoder(
-        database_folder=args.base_folder,
+        database_folders=args.base_folders,
         save_folder=args.save_folder,
         num_epochs=args.num_epochs,
         batch_size=args.batch_size,
@@ -277,7 +280,8 @@ if __name__ == "__main__":
     extract_embeddings(autoencoder,
                        transform,
                        device,
-                       args.base_folder,
+                       args.base_folders,
                        args.save_folder,
                        args.embedding_dim,
                        args.encoder_type)
+

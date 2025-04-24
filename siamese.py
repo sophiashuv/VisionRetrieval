@@ -9,7 +9,7 @@ import pandas as pd
 import numpy as np
 from PIL import Image
 from torchvision import datasets, transforms, models
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader, random_split, ConcatDataset
 from torch.utils.tensorboard import SummaryWriter
 
 from autoencoder import Autoencoder
@@ -42,8 +42,8 @@ class SiameseDataset(Dataset):
             positive_path = random.choice(self.class_to_imgs[negative_class])
             label = 0
 
-        anchor_image = Image.open(anchor_path).convert("L")
-        positive_image = Image.open(positive_path).convert("L")
+        anchor_image = Image.open(anchor_path).convert("RGB")
+        positive_image = Image.open(positive_path).convert("RGB")
 
         return (
             self.transform(anchor_image),
@@ -62,7 +62,7 @@ class SiameseNetwork(nn.Module):
             self.cnn = encoder
         else:
             self.cnn = nn.Sequential(
-                nn.Conv2d(1, 32, 3, stride=2, padding=1),
+                nn.Conv2d(3, 32, 3, stride=2, padding=1),
                 nn.ReLU(),
                 nn.Conv2d(32, 64, 3, stride=2, padding=1),
                 nn.ReLU(),
@@ -100,7 +100,7 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
         return autoencoder.encoder
     elif encoder_type == "resnet":
         model = models.resnet18(pretrained=True)
-        model.conv1 = torch.nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        model.conv1 = torch.nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
         encoder = torch.nn.Sequential(*list(model.children())[:-1])
         return torch.nn.Sequential(
             encoder,
@@ -111,7 +111,7 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
 
     elif encoder_type == "mobilenet":
         model = models.mobilenet_v2(pretrained=True)
-        model.features[0][0] = torch.nn.Conv2d(1, 32, kernel_size=3, stride=2, padding=1, bias=False)
+        model.features[0][0] = torch.nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1, bias=False)
         encoder = model.features
         return torch.nn.Sequential(
             encoder,
@@ -122,7 +122,7 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
 
     elif encoder_type == "efficientnet":
         model = models.efficientnet_b0(pretrained=True)
-        model.features[0][0] = torch.nn.Conv2d(1, 32, kernel_size=3, stride=2, padding=1, bias=False)
+        model.features[0][0] = torch.nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1, bias=False)
         encoder = model.features
         return torch.nn.Sequential(
             encoder,
@@ -133,7 +133,7 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
 
     elif encoder_type == "basic":
         return torch.nn.Sequential(
-            torch.nn.Conv2d(1, 32, 3, stride=2, padding=1),
+            torch.nn.Conv2d(3, 32, 3, stride=2, padding=1),
             torch.nn.ReLU(),
             torch.nn.Conv2d(32, 64, 3, stride=2, padding=1),
             torch.nn.ReLU(),
@@ -147,21 +147,23 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
         raise ValueError(f"Unknown encoder type: {encoder_type}")
 
 
-def train_siamese_network(database_folder, save_folder, embedding_dim=256, num_epochs=20, batch_size=16,
+def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_epochs=20, batch_size=16,
                           learning_rate=0.001, encoder_type="basic", encoder_path=None,
                           early_stopping_patience=5):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     transform = transforms.Compose([
-        transforms.Grayscale(num_output_channels=1),
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5], std=[0.5])
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
     ])
 
-    image_folder_dataset = datasets.ImageFolder(root=database_folder)
+    datasets_list = [datasets.ImageFolder(root=folder) for folder in database_folders]
+    image_folder_dataset = ConcatDataset(datasets_list)
     siamese_dataset = SiameseDataset(image_folder_dataset, transform)
+    print(f"Dataset loaded from {', '.join(database_folders)}: {len(image_folder_dataset)} images found.")
 
     val_size = int(0.2 * len(siamese_dataset))
     train_size = len(siamese_dataset) - val_size
@@ -244,26 +246,27 @@ def train_siamese_network(database_folder, save_folder, embedding_dim=256, num_e
     return model, transform, device
 
 
-def extract_embeddings(model, transform, device, database_folder, save_folder, embedding_dim=256, encoder_type="basic"):
+def extract_embeddings(model, transform, device, database_folders, save_folder, embedding_dim=256, encoder_type="basic"):
     model.eval()
     embeddings = []
     image_paths = []
 
-    for class_folder in os.listdir(database_folder):
-        class_path = os.path.join(database_folder, class_folder)
-        if os.path.isdir(class_path):
-            for filename in os.listdir(class_path):
-                file_path = os.path.join(class_path, filename)
-                if filename.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".avif")):
-                    try:
-                        image = Image.open(file_path).convert("L")
-                        image_tensor = transform(image).unsqueeze(0).to(device)
-                        with torch.no_grad():
-                            emb = model.forward_once(image_tensor)
-                        embeddings.append(emb.squeeze().cpu().numpy())
-                        image_paths.append(file_path)
-                    except Exception as e:
-                        print(f"Error processing {file_path}: {e}")
+    for base_folder in database_folders:
+        for class_folder in os.listdir(base_folder):
+            class_path = os.path.join(base_folder, class_folder)
+            if os.path.isdir(class_path):
+                for filename in os.listdir(class_path):
+                    file_path = os.path.join(class_path, filename)
+                    if filename.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".avif")):
+                        try:
+                            image = Image.open(file_path).convert("RGB")
+                            image_tensor = transform(image).unsqueeze(0).to(device)
+                            with torch.no_grad():
+                                emb = model.forward_once(image_tensor)
+                            embeddings.append(emb.squeeze().cpu().numpy())
+                            image_paths.append(file_path)
+                        except Exception as e:
+                            print(f"Error processing {file_path}: {e}")
 
     if len(embeddings) == 0:
         print("No valid embeddings found. Exiting.")
@@ -282,7 +285,7 @@ def extract_embeddings(model, transform, device, database_folder, save_folder, e
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train a Siamese network and extract embeddings.")
-    parser.add_argument("--base_folder", required=True, help="Dataset base folder")
+    parser.add_argument("--base_folders", nargs='+', required=True, help="One or more dataset base folders")
     parser.add_argument("--save_folder", required=True, help="Folder to save model and embeddings")
     parser.add_argument("--encoder_type", type=str, default="basic",
                         choices=["basic", "resnet", "mobilenet", "efficientnet", "autoencoder_basic",
@@ -298,7 +301,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     model, transform, device = train_siamese_network(
-        database_folder=args.base_folder,
+        database_folders=args.base_folders,
         save_folder=args.save_folder,
         embedding_dim=args.embedding_dim,
         num_epochs=args.num_epochs,
@@ -313,7 +316,7 @@ if __name__ == "__main__":
         model=model,
         transform=transform,
         device=device,
-        database_folder=args.base_folder,
+        database_folders=args.base_folders,
         save_folder=args.save_folder,
         embedding_dim=args.embedding_dim,
         encoder_type=args.encoder_type
