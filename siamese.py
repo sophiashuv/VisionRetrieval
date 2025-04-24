@@ -16,21 +16,28 @@ from autoencoder import Autoencoder
 
 
 class SiameseDataset(Dataset):
-    def __init__(self, image_folder_dataset, transform):
-        self.image_folder_dataset = image_folder_dataset
+    def __init__(self, dataset_list, transform):
         self.transform = transform
+        # Flatten all samples from each dataset
+        self.samples = []
+        self.classes = set()
+        for ds in dataset_list:
+            self.samples.extend(ds.samples)
+            self.classes.update(ds.classes)
+        self.classes = sorted(list(self.classes))
         self.class_to_imgs = self._group_by_class()
 
     def _group_by_class(self):
         class_to_imgs = {}
-        for path, target in self.image_folder_dataset.samples:
-            class_name = self.image_folder_dataset.classes[target]
+        for path, target in self.samples:
+            class_name = os.path.basename(os.path.dirname(path))  # directory name = class
             class_to_imgs.setdefault(class_name, []).append(path)
         return class_to_imgs
 
     def __getitem__(self, index):
-        anchor_path, anchor_label = self.image_folder_dataset.samples[index]
-        anchor_class = self.image_folder_dataset.classes[anchor_label]
+        anchor_path, anchor_label = self.samples[index]
+        anchor_class = os.path.basename(os.path.dirname(anchor_path))
+
         should_get_same_class = random.randint(0, 1)
 
         if should_get_same_class:
@@ -161,9 +168,9 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
     ])
 
     datasets_list = [datasets.ImageFolder(root=folder) for folder in database_folders]
-    image_folder_dataset = ConcatDataset(datasets_list)
-    siamese_dataset = SiameseDataset(image_folder_dataset, transform)
-    print(f"Dataset loaded from {', '.join(database_folders)}: {len(image_folder_dataset)} images found.")
+    siamese_dataset = SiameseDataset(datasets_list, transform)
+
+    print(f"Dataset loaded from {', '.join(database_folders)}: {len(siamese_dataset.samples)} images found.")
 
     val_size = int(0.2 * len(siamese_dataset))
     train_size = len(siamese_dataset) - val_size
