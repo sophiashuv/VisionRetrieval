@@ -59,7 +59,7 @@ class SiameseDataset(Dataset):
         )
 
     def __len__(self):
-        return len(self.image_folder_dataset)
+        return len(self.samples)
 
 
 class SiameseNetwork(nn.Module):
