@@ -18,7 +18,7 @@ from pretrained import extract_features, initialize_model
 import matplotlib.pyplot as plt
 
 def visualize_reconstruction(image_path, model, transform, device, encoder_type="basic", save_path=None):
-    image = Image.open(image_path).convert("L")
+    image = Image.open(image_path).convert("RGB")
     image_tensor = transform(image).unsqueeze(0).to(device)
 
     with torch.no_grad():
@@ -101,10 +101,10 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
     param_count = 0
     if "siamese" in method:
         transform = transforms.Compose([
-            transforms.Grayscale(num_output_channels=1),
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5], std=[0.5])
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
         ])
 
         models = method.split("_")
@@ -115,9 +115,10 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
         model = siamese_model
     elif "autoencoder" in method:
         transform = transforms.Compose([
-            transforms.Grayscale(num_output_channels=1),
             transforms.Resize((224, 224)),
-            transforms.ToTensor()
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
         ])
 
         _,  encoder_type = method.split("_")
@@ -149,14 +150,14 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
                 start = time.time()
 
                 if "siamese" in method:
-                    image = Image.open(file_path).convert("L")
+                    image = Image.open(file_path).convert("RGB")
                     image_tensor = transform(image).unsqueeze(0).to(device)
                     with torch.no_grad():
                         query_embedding = model.forward_once(image_tensor)
                         query_vector = query_embedding.squeeze().cpu().numpy().astype(np.float32).reshape(1, -1)
 
                 elif "autoencoder" in method:
-                    image = Image.open(file_path).convert("L")
+                    image = Image.open(file_path).convert("RGB")
                     image_tensor = transform(image).unsqueeze(0).to(device)
                     with torch.no_grad():
                         query_embedding, _ = model(image_tensor)
