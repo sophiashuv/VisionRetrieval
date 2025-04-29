@@ -11,33 +11,82 @@ from PIL import Image
 from torchvision import datasets, transforms, models
 from torch.utils.data import Dataset, DataLoader, random_split, ConcatDataset
 from torch.utils.tensorboard import SummaryWriter
-
+import torch.nn as nn
+from torchvision.transforms import functional as F
 from autoencoder import Autoencoder
 
+# class SiameseDataset(Dataset):
+#     def __init__(self, dataset_list, transform):
+#         self.transform = transform
+#         self.samples = []
+#         self.classes = set()
+#
+#         for ds in dataset_list:
+#             self.samples.extend(ds.samples)
+#             self.classes.update(ds.classes)
+#
+#         self.classes = sorted(list(self.classes))
+#         self.class_to_imgs = self._group_by_class()
+#
+#         # Store class list and max class length for balanced indexing
+#         self.class_names = list(self.class_to_imgs.keys())
+#         self.max_class_length = max(len(imgs) for imgs in self.class_to_imgs.values())
+#
+#     def _group_by_class(self):
+#         class_to_imgs = {}
+#         for path, _ in self.samples:
+#             class_name = os.path.basename(os.path.dirname(path))
+#             class_to_imgs.setdefault(class_name, []).append(path)
+#         return class_to_imgs
+#
+#     def __len__(self):
+#         return len(self.class_names) * self.max_class_length
+#
+#     def __getitem__(self, index):
+#         # Balanced anchor selection by cycling through class names
+#         anchor_class = self.class_names[index % len(self.class_names)]
+#         anchor_path = random.choice(self.class_to_imgs[anchor_class])
+#
+#         should_get_same_class = random.randint(0, 1)
+#
+#         if should_get_same_class:
+#             # Positive pair
+#             positive_path = random.choice(self.class_to_imgs[anchor_class])
+#             label = 1
+#         else:
+#             # Negative pair
+#             negative_classes = [cls for cls in self.class_names if cls != anchor_class]
+#             negative_class = random.choice(negative_classes)
+#             positive_path = random.choice(self.class_to_imgs[negative_class])
+#             label = 0
+#
+#         # Load images
+#         anchor_image = Image.open(anchor_path).convert("RGB")
+#         pair_image = Image.open(positive_path).convert("RGB")
+#
+#         return (
+#             self.transform(anchor_image),
+#             self.transform(pair_image),
+#             torch.tensor(label, dtype=torch.float32)
+#         )
+#
 
 class SiameseDataset(Dataset):
-    def __init__(self, dataset_list, transform):
+    def __init__(self, image_folder_dataset, transform):
+        self.image_folder_dataset = image_folder_dataset
         self.transform = transform
-        # Flatten all samples from each dataset
-        self.samples = []
-        self.classes = set()
-        for ds in dataset_list:
-            self.samples.extend(ds.samples)
-            self.classes.update(ds.classes)
-        self.classes = sorted(list(self.classes))
         self.class_to_imgs = self._group_by_class()
 
     def _group_by_class(self):
         class_to_imgs = {}
-        for path, target in self.samples:
-            class_name = os.path.basename(os.path.dirname(path))  # directory name = class
+        for path, target in self.image_folder_dataset.samples:
+            class_name = self.image_folder_dataset.classes[target]
             class_to_imgs.setdefault(class_name, []).append(path)
         return class_to_imgs
 
     def __getitem__(self, index):
-        anchor_path, anchor_label = self.samples[index]
-        anchor_class = os.path.basename(os.path.dirname(anchor_path))
-
+        anchor_path, anchor_label = self.image_folder_dataset.samples[index]
+        anchor_class = self.image_folder_dataset.classes[anchor_label]
         should_get_same_class = random.randint(0, 1)
 
         if should_get_same_class:
@@ -55,11 +104,11 @@ class SiameseDataset(Dataset):
         return (
             self.transform(anchor_image),
             self.transform(positive_image),
-            torch.tensor(label, dtype=torch.float32)  # <-- fix here
+            torch.tensor([label], dtype=torch.float32)
         )
 
     def __len__(self):
-        return len(self.samples)
+        return len(self.image_folder_dataset)
 
 
 class SiameseNetwork(nn.Module):
@@ -78,12 +127,73 @@ class SiameseNetwork(nn.Module):
                 nn.Flatten(),
                 nn.Linear(128 * 28 * 28, embedding_dim)
             )
+        self.head = nn.Sequential(
+            nn.Linear(embedding_dim, embedding_dim),
+            nn.ReLU(),
+            nn.Linear(embedding_dim, embedding_dim)
+        )
 
     def forward_once(self, x):
-        return self.cnn(x)
+        x = self.cnn(x)
+        x = nn.functional.normalize(x, p=2, dim=1)
+        x = self.head(x)
+        return x
 
     def forward(self, x1, x2):
         return self.forward_once(x1), self.forward_once(x2)
+
+
+class SmartResize:
+    def __init__(self, max_size=224, interpolation=Image.BICUBIC):
+        self.max_size = max_size
+        self.interpolation = interpolation
+
+    def __call__(self, img):
+        width, height = img.size
+        if width > self.max_size or height > self.max_size:
+            # Resize so that max dimension = max_size
+            scale = self.max_size / max(width, height)
+            new_size = (int(width * scale), int(height * scale))
+            return F.resize(img, new_size, interpolation=self.interpolation)
+        else:
+            # Keep original or gently upscale
+            return img
+
+
+class BetterEncoder(nn.Module):
+    def __init__(self, embedding_dim=256):
+        super(BetterEncoder, self).__init__()
+
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d(2),  # 112x112
+
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(2),  # 56x56
+
+            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.MaxPool2d(2),  # 28x28
+
+            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((1, 1))  # output shape [batch_size, 256, 1, 1]
+        )
+
+        self.fc = nn.Linear(256, embedding_dim)
+
+    def forward(self, x):
+        x = self.features(x)
+        x = x.view(x.size(0), -1)  # flatten
+        x = self.fc(x)
+        return x
+
 
 
 class ContrastiveLoss(nn.Module):
@@ -149,6 +259,8 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
             torch.nn.Flatten(),
             torch.nn.Linear(128 * 28 * 28, embedding_dim)
         )
+    elif encoder_type == "better":
+        return BetterEncoder(embedding_dim=embedding_dim)
 
     else:
         raise ValueError(f"Unknown encoder type: {encoder_type}")
@@ -161,16 +273,18 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     transform = transforms.Compose([
-        transforms.Resize((224, 224)),
+        SmartResize(max_size=224, interpolation=Image.BICUBIC),
+        transforms.CenterCrop(224),  # (Optional) to get final fixed size
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
     ])
 
-    datasets_list = [datasets.ImageFolder(root=folder) for folder in database_folders]
-    siamese_dataset = SiameseDataset(datasets_list, transform)
+    # datasets_list = [datasets.ImageFolder(root=folder) for folder in database_folders]
+    image_folder_dataset = datasets.ImageFolder(root=database_folders[0])
+    siamese_dataset = SiameseDataset(image_folder_dataset, transform)
 
-    print(f"Dataset loaded from {', '.join(database_folders)}: {len(siamese_dataset.samples)} images found.")
+    # print(f"Dataset loaded from {', '.join(database_folders)}: {len(siamese_dataset.samples)} images found.")
 
     val_size = int(0.2 * len(siamese_dataset))
     train_size = len(siamese_dataset) - val_size
@@ -216,6 +330,9 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
         total = 0
 
         with torch.no_grad():
+            dists = torch.nn.functional.pairwise_distance(output1, output2)
+            # print(
+            #     f"Avg Distance: {dists.mean().item():.4f}, Pos Avg: {(dists[label == 1]).mean().item():.4f}, Neg Avg: {(dists[label == 0]).mean().item():.4f}")
             for img1, img2, label in val_loader:
                 img1, img2, label = img1.to(device), img2.to(device), label.to(device)
                 output1, output2 = model(img1, img2)
@@ -296,7 +413,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_folder", required=True, help="Folder to save model and embeddings")
     parser.add_argument("--encoder_type", type=str, default="basic",
                         choices=["basic", "resnet", "mobilenet", "efficientnet", "autoencoder_basic",
-                                 "autoencoder_resnet", "autoencoder_mobilenet", "autoencoder_efficientnet"],
+                                 "autoencoder_resnet", "autoencoder_mobilenet", "autoencoder_efficientnet", "better"],
                         help="Type of encoder to use")
     parser.add_argument("--encoder_path", type=str, default=None,
                         help="Path to pretrained encoder.pth weights")

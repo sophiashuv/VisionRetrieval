@@ -11,14 +11,14 @@ import time
 from PIL import Image
 from torchvision import transforms
 from autoencoder import Autoencoder
-from siamese import SiameseNetwork, build_encoder
+from siamese import SiameseNetwork, build_encoder, SmartResize
 from hash import dhash, phash, hash_to_bitvector
 from pretrained import extract_features, initialize_model
 
 import matplotlib.pyplot as plt
 
 def visualize_reconstruction(image_path, model, transform, device, encoder_type="basic", save_path=None):
-    image = Image.open(image_path).convert("RGB")
+    image = Image.open(image_path).convert("L")
     image_tensor = transform(image).unsqueeze(0).to(device)
 
     with torch.no_grad():
@@ -101,7 +101,8 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
     param_count = 0
     if "siamese" in method:
         transform = transforms.Compose([
-            transforms.Resize((224, 224)),
+            SmartResize(max_size=224, interpolation=Image.BICUBIC),
+            transforms.CenterCrop(224),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225])
@@ -110,6 +111,7 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
         models = method.split("_")
         encoder = build_encoder(models[-1], embedding_dim, None, device)
         siamese_model = SiameseNetwork(encoder=encoder, embedding_dim=embedding_dim).to(device)
+
         siamese_model.load_state_dict(torch.load(os.path.join(database_folder, f"{method}.pth"), map_location=device))
         siamese_model.eval()
         model = siamese_model
@@ -144,9 +146,7 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
         for filename in sorted(os.listdir(subfolder_path)):
             file_path = os.path.join(subfolder_path, filename)
             if not filename.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".avif")): continue
-
             try:
-
                 start = time.time()
 
                 if "siamese" in method:
@@ -154,10 +154,10 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
                     image_tensor = transform(image).unsqueeze(0).to(device)
                     with torch.no_grad():
                         query_embedding = model.forward_once(image_tensor)
-                        query_vector = query_embedding.squeeze().cpu().numpy().astype(np.float32).reshape(1, -1)
+                    query_vector = query_embedding.squeeze().cpu().numpy().astype(np.float32).reshape(1, -1)
 
                 elif "autoencoder" in method:
-                    image = Image.open(file_path).convert("RGB")
+                    image = Image.open(file_path).convert("L")
                     image_tensor = transform(image).unsqueeze(0).to(device)
                     with torch.no_grad():
                         query_embedding, _ = model(image_tensor)
@@ -220,7 +220,7 @@ if __name__ == "__main__":
                                              "pretrained_resnet", "pretrained_mobilenet", "pretrained_efficientnet",
                                              "autoencoder_basic",
                                              "autoencoder_resnet", "autoencoder_mobilenet", "autoencoder_efficientnet",
-                                             "siamese_basic",
+                                             "siamese_basic", "siamese_better",
                                              "siamese_resnet", "siamese_mobilenet", "siamese_efficientnet",
                                              "siamese_autoencoder_basic", "siamese_autoencoder_resnet",
                                              "siamese_autoencoder_mobilenet","siamese_autoencoder_efficientnet"],
