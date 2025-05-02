@@ -2,7 +2,6 @@ import argparse
 import os
 import random
 import torch
-import torch.nn as nn
 import torch.optim as optim
 import faiss
 import pandas as pd
@@ -12,7 +11,7 @@ from torchvision import datasets, transforms, models
 from torch.utils.data import Dataset, DataLoader, random_split, ConcatDataset
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
-from torchvision.transforms import functional as F
+
 from autoencoder import Autoencoder
 
 
@@ -90,15 +89,15 @@ class SiameseNetwork(nn.Module):
         if encoder is not None:
             self.cnn = encoder
         else:
-            self.cnn = nn.Sequential(
-                nn.Conv2d(3, 32, 3, stride=2, padding=1),
-                nn.ReLU(),
-                nn.Conv2d(32, 64, 3, stride=2, padding=1),
-                nn.ReLU(),
-                nn.Conv2d(64, 128, 3, stride=2, padding=1),
-                nn.ReLU(),
-                nn.Flatten(),
-                nn.Linear(128 * 28 * 28, embedding_dim)
+            self.cnn = torch.nn.Sequential(
+                torch.nn.Conv2d(3, 32, 3, stride=2, padding=1),
+                torch.nn.ReLU(),
+                torch.nn.Conv2d(32, 64, 3, stride=2, padding=1),
+                torch.nn.ReLU(),
+                torch.nn.Conv2d(64, 128, 3, stride=2, padding=1),
+                torch.nn.ReLU(),
+                torch.nn.Flatten(),
+                torch.nn.Linear(128 * 28 * 28, embedding_dim)
             )
         self.head = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
@@ -114,21 +113,6 @@ class SiameseNetwork(nn.Module):
 
     def forward(self, x1, x2):
         return self.forward_once(x1), self.forward_once(x2)
-
-
-class SmartResize:
-    def __init__(self, max_size=224, interpolation=Image.BICUBIC):
-        self.max_size = max_size
-        self.interpolation = interpolation
-
-    def __call__(self, img):
-        width, height = img.size
-        if width > self.max_size or height > self.max_size:
-            scale = self.max_size / max(width, height)
-            new_size = (int(width * scale), int(height * scale))
-            return F.resize(img, new_size, interpolation=self.interpolation)
-        else:
-            return img
 
 
 class BetterEncoder(nn.Module):
@@ -153,8 +137,7 @@ class BetterEncoder(nn.Module):
 
             nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(256),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d((1, 1))
+            nn.ReLU()
         )
 
         self.fc = nn.Linear(256, embedding_dim)
@@ -243,8 +226,7 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     transform = transforms.Compose([
-        SmartResize(max_size=224, interpolation=Image.BICUBIC),
-        transforms.CenterCrop(224),
+        transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
@@ -299,9 +281,6 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
         total = 0
 
         with torch.no_grad():
-            dists = torch.nn.functional.pairwise_distance(output1, output2)
-            print(
-                f"Avg Distance: {dists.mean().item():.4f}, Pos Avg: {(dists[label == 1]).mean().item():.4f}, Neg Avg: {(dists[label == 0]).mean().item():.4f}")
             for img1, img2, label in val_loader:
                 img1, img2, label = img1.to(device), img2.to(device), label.to(device)
                 output1, output2 = model(img1, img2)

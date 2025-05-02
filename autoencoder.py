@@ -23,7 +23,40 @@ def ensure_subfolder_exists(folders):
                 if filename.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".avif")):
                     shutil.move(file_path, os.path.join(default_class_folder, filename))
 
+class BetterEncoder(nn.Module):
+    def __init__(self, embedding_dim=256):
+        super(BetterEncoder, self).__init__()
 
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+
+            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+
+            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU()
+        )
+
+        self.fc = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(256 * 28 * 28, embedding_dim)
+        )
+
+    def forward(self, x):
+        x = self.features(x)
+        x = self.fc(x)
+        return x
 
 class Autoencoder(nn.Module):
     def __init__(self, embedding_dim=256, encoder_type="basic"):
@@ -43,25 +76,62 @@ class Autoencoder(nn.Module):
                 nn.Linear(128 * 28 * 28, embedding_dim)
             )
             encoder_output_size = embedding_dim
+            self.decoder = nn.Sequential(
+                nn.Linear(embedding_dim, 128 * 28 * 28),
+                nn.ReLU(),
+                nn.Unflatten(1, (128, 28, 28)),
+                nn.ConvTranspose2d(128, 64, 3, stride=2, padding=1, output_padding=1),
+                nn.ReLU(),
+                nn.ConvTranspose2d(64, 32, 3, stride=2, padding=1, output_padding=1),
+                nn.ReLU(),
+                nn.ConvTranspose2d(32, 3, 3, stride=2, padding=1, output_padding=1),
+                nn.Sigmoid()
+            )
+        elif encoder_type == "better":
+            self.encoder = BetterEncoder(embedding_dim=embedding_dim)
+            self.decoder = nn.Sequential(
+                nn.Linear(embedding_dim, 256 * 28 * 28),
+                nn.ReLU(),
+                nn.Unflatten(1, (256, 28, 28)),
+                nn.ConvTranspose2d(256, 128, 3, stride=1, padding=1),
+                nn.BatchNorm2d(128),
+                nn.ReLU(),
+                nn.Upsample(scale_factor=2, mode='nearest'),
+
+                nn.ConvTranspose2d(128, 64, 3, stride=1, padding=1),
+                nn.BatchNorm2d(64),
+                nn.ReLU(),
+                nn.Upsample(scale_factor=2, mode='nearest'),
+
+                nn.ConvTranspose2d(64, 32, 3, stride=1, padding=1),
+                nn.BatchNorm2d(32),
+                nn.ReLU(),
+                nn.Upsample(scale_factor=2, mode='nearest'),
+
+                nn.ConvTranspose2d(32, 3, 3, stride=1, padding=1),
+                nn.Sigmoid()
+            )
+
 
         else:
             if encoder_type == "resnet":
                 model = models.resnet18(pretrained=True)
-                model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+                model.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
                 self.feature_extractor = nn.Sequential(*list(model.children())[:-1])  # Remove FC layer
                 encoder_output_size = model.fc.in_features
 
             elif encoder_type == "mobilenet":
                 model = models.mobilenet_v2(pretrained=True)
-                model.features[0][0] = nn.Conv2d(1, 32, kernel_size=3, stride=2, padding=1, bias=False)
+                model.features[0][0] = nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1, bias=False)
                 self.feature_extractor = model.features
                 encoder_output_size = 1280
 
             elif encoder_type == "efficientnet":
                 model = models.efficientnet_b0(pretrained=True)
-                model.features[0][0] = nn.Conv2d(1, 32, kernel_size=3, stride=2, padding=1, bias=False)
+                model.features[0][0] = nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1, bias=False)
                 self.feature_extractor = model.features
                 encoder_output_size = 1280
+
 
             else:
                 raise ValueError(f"Unsupported encoder type: {encoder_type}")
@@ -73,17 +143,17 @@ class Autoencoder(nn.Module):
                 nn.Linear(encoder_output_size, embedding_dim)
             )
 
-        self.decoder = nn.Sequential(
-            nn.Linear(embedding_dim, 128 * 28 * 28),
-            nn.ReLU(),
-            nn.Unflatten(1, (128, 28, 28)),
-            nn.ConvTranspose2d(128, 64, 3, stride=2, padding=1, output_padding=1),
-            nn.ReLU(),
-            nn.ConvTranspose2d(64, 32, 3, stride=2, padding=1, output_padding=1),
-            nn.ReLU(),
-            nn.ConvTranspose2d(32, 1, 3, stride=2, padding=1, output_padding=1),
-            nn.Sigmoid()
-        )
+            self.decoder = nn.Sequential(
+                nn.Linear(embedding_dim, 128 * 28 * 28),
+                nn.ReLU(),
+                nn.Unflatten(1, (128, 28, 28)),
+                nn.ConvTranspose2d(128, 64, 3, stride=2, padding=1, output_padding=1),
+                nn.ReLU(),
+                nn.ConvTranspose2d(64, 32, 3, stride=2, padding=1, output_padding=1),
+                nn.ReLU(),
+                nn.ConvTranspose2d(32, 3, 3, stride=2, padding=1, output_padding=1),
+                nn.Sigmoid()
+            )
 
     def forward(self, x):
         encoded = self.encoder(x)
@@ -97,9 +167,7 @@ def train_autoencoder(database_folders, save_folder, num_epochs=20, batch_size=1
     print(f"Using device: {device}")
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])
+        transforms.ToTensor()
     ])
     writer = SummaryWriter(log_dir=os.path.join(save_folder, f"autoencoder_{encoder_type}_tensorboard"))
     autoencoder = Autoencoder(embedding_dim, encoder_type).to(device)
@@ -192,11 +260,11 @@ def save_reconstructions(originals, reconstructions, save_path, epoch, encoder_t
 
     fig, axes = plt.subplots(2, 5, figsize=(12, 4))
     for i in range(5):
-        axes[0, i].imshow(originals[i][0], cmap='gray')
+        axes[0, i].imshow(np.transpose(originals[i], (1, 2, 0)))
         axes[0, i].axis("off")
         axes[0, i].set_title("Original")
 
-        axes[1, i].imshow(reconstructions[i][0], cmap='gray')
+        axes[1, i].imshow(np.transpose(reconstructions[i], (1, 2, 0)))
         axes[1, i].axis("off")
         axes[1, i].set_title("Reconstructed")
 
@@ -255,7 +323,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train an autoencoder and extract image embeddings.")
     parser.add_argument("--base_folders", nargs='+', help="List of folders containing images", required=True)
     parser.add_argument("--encoder_type", type=str, default="basic",
-                        choices=["basic", "resnet", "mobilenet", "efficientnet"],
+                        choices=["basic", "resnet", "mobilenet", "efficientnet", "better"],
                         help="Type of encoder to use in the autoencoder")
     parser.add_argument("--save_folder", help="Folder to save model and embeddings", required=True)
     parser.add_argument("--num_epochs", type=int, default=100, help="Number of training epochs")
