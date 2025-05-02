@@ -359,7 +359,7 @@ if __name__ == "__main__":
     parser.add_argument("--base_folders", nargs='+', required=True, help="One or more dataset base folders")
     parser.add_argument("--save_folder", required=True, help="Folder to save model and embeddings")
     parser.add_argument("--encoder_type", type=str, default="basic",
-                        choices=["basic", "resnet", "mobilenet", "efficientnet", "autoencoder_basic",
+                        choices=["basic", "resnet", "mobilenet", "efficientnet", "autoencoder_basic", "autoencoder_better"
                                  "autoencoder_resnet", "autoencoder_mobilenet", "autoencoder_efficientnet", "better"],
                         help="Type of encoder to use")
     parser.add_argument("--encoder_path", type=str, default=None,
