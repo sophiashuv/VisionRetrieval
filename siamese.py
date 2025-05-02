@@ -140,12 +140,14 @@ class BetterEncoder(nn.Module):
             nn.ReLU()
         )
 
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(256, embedding_dim)
 
     def forward(self, x):
         x = self.features(x)
-        x = x.view(x.size(0), -1)
-        x = self.fc(x)
+        x = self.pool(x)  # Now x has shape [B, 256, 1, 1]
+        x = x.view(x.size(0), -1)  # Flatten to [B, 256]
+        x = self.fc(x)  # Output shape [B, embedding_dim]
         return x
 
 

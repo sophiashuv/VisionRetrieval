@@ -49,8 +49,9 @@ class BetterEncoder(nn.Module):
         )
 
         self.fc = nn.Sequential(
+            nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten(),
-            nn.Linear(256 * 28 * 28, embedding_dim)
+            nn.Linear(256, embedding_dim)
         )
 
     def forward(self, x):
