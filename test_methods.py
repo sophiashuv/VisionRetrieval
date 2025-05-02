@@ -73,12 +73,21 @@ def compute_relevance_metrics(y_true, y_pred_top5):
         [1 if os.path.basename(os.path.dirname(p)) == true else 0 for p in preds]
         for true, preds in zip(y_true, y_pred_top5)
     ]
-    precision_at_5 = np.mean([np.sum(rel) / len(rel) for rel in binary_relevance])
-    recall_at_5 = np.mean([np.sum(rel) for rel in binary_relevance])
-    ap_list = [
-        sum(r / (i + 1) for i, r in enumerate(rel) if r) / min(1, sum(rel)) if sum(rel) else 0
-        for rel in binary_relevance
-    ]
+
+    precision_at_5 = np.mean([np.sum(rel) / 5.0 for rel in binary_relevance])
+    recall_at_5 = np.mean([min(np.sum(rel), 1.0) for rel in binary_relevance])
+
+    ap_list = []
+    for rel in binary_relevance:
+        num_relevant = 0
+        ap = 0.0
+        for i, r in enumerate(rel):
+            if r:
+                num_relevant += 1
+                ap += num_relevant / (i + 1)
+        ap = ap / num_relevant if num_relevant else 0.0
+        ap_list.append(ap)
+
     mAP = np.mean(ap_list)
     return precision_at_5, recall_at_5, mAP
 
@@ -192,10 +201,12 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
                     "method": method,
                     "query_folder": subfolder,
                     "top_5": top_5,
+                    "distances": [round(float(d), 6) for d in distances[0]],
                     "top1_match": top1,
                     "top5_match": top5,
                     "retrieval_time_sec": round(elapsed, 4)
                 })
+
             except Exception as e:
                 output_data.append({"filename": filename, "error": str(e)})
 
