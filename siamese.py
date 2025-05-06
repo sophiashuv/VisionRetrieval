@@ -18,6 +18,42 @@ from tqdm import tqdm
 import open_clip
 from sklearn.metrics.pairwise import cosine_similarity
 
+class CSVPairSiameseDataset(Dataset):
+    def __init__(self, folders, transform):
+        self.transform = transform
+        self.pair_data = []
+
+        for folder in folders:
+            csv_path = os.path.join(folder, "pairs.csv")
+            if not os.path.exists(csv_path):
+                raise FileNotFoundError(f"{csv_path} not found.")
+            df = pd.read_csv(csv_path)
+
+            for _, row in df.iterrows():
+                pair_id = row["pair_id"]
+                anchor_path = os.path.join(folder, f"pair_{pair_id:05d}_anchor.jpg")
+                pair_path = os.path.join(folder, f"pair_{pair_id:05d}_pair.jpg")
+                label = int(row["label"])
+
+                if os.path.exists(anchor_path) and os.path.exists(pair_path):
+                    self.pair_data.append((anchor_path, pair_path, label))
+
+        print(f"Loaded {len(self.pair_data)} image pairs from {len(folders)} folder(s).")
+
+    def __len__(self):
+        return len(self.pair_data)
+
+    def __getitem__(self, index):
+        anchor_path, pair_path, label = self.pair_data[index]
+
+        anchor_img = Image.open(anchor_path).convert("RGB")
+        pair_img = Image.open(pair_path).convert("RGB")
+
+        return (
+            self.transform(anchor_img),
+            self.transform(pair_img),
+            torch.tensor([label], dtype=torch.float32)
+        )
 
 class UnlabeledCLIPSiameseDataset(Dataset):
     def __init__(self, image_dir, transform, device):
@@ -283,7 +319,7 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
 
 def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_epochs=20, batch_size=16,
                           learning_rate=0.001, encoder_type="basic", encoder_path=None,
-                          early_stopping_patience=5, use_clip_loader=False,):
+                          early_stopping_patience=5, use_clip_loader=False, use_pair_csv_loader=False):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -293,7 +329,11 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
     ])
-    if use_clip_loader:
+    if use_pair_csv_loader:
+        print("Using CSV-based image pair dataset...")
+        siamese_dataset = CSVPairSiameseDataset(folders=database_folders, transform=transform)
+
+    elif use_clip_loader:
         print("Using CLIP-based unlabeled data loader...")
         siamese_dataset = UnlabeledCLIPSiameseDataset(
             image_dir=database_folders[0],
@@ -440,6 +480,7 @@ if __name__ == "__main__":
     parser.add_argument("--embedding_dim", type=int, default=256)
     parser.add_argument("--es_patience", type=int, default=5, help="Number of epochs to wait before early stopping")
     parser.add_argument("--use_clip_loader", action="store_true", help="Use CLIP-based dataloader for unlabeled images")
+    parser.add_argument("--use_pair_csv_loader", action="store_true", help="Use pre-generated CSV-based image pairs")
     parser.add_argument("--test_folder", nargs='+', help="Path to test images.")
     args = parser.parse_args()
 
@@ -453,7 +494,8 @@ if __name__ == "__main__":
         encoder_type=args.encoder_type,
         encoder_path=args.encoder_path,
         early_stopping_patience=args.es_patience,
-        use_clip_loader=args.use_clip_loader
+        use_clip_loader=args.use_clip_loader,
+        use_pair_csv_loader = args.use_pair_csv_loader
     )
     if  args.test_folder:
         extract_embeddings(
