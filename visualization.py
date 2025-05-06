@@ -57,45 +57,33 @@ def visualize_retrievals(json_path, query_root, output_folder, n_samples=5):
 
 
 def plot_metrics(csv_path, output_folder):
-
     os.makedirs(output_folder, exist_ok=True)
     df = pd.read_csv(csv_path)
 
-    df["Method_Model"] = df.apply(
-        lambda row: row["Method"] if pd.isna(row["Model"]) else f"{row['Method']}_{row['Model']}",
-        axis=1
-    )
+    # Rename columns to consistent format
+    df = df.rename(columns={
+        "Top-1 Accuracy": "Top-1 Acc",
+        "Top-5 Accuracy": "Top-5 Acc",
+        "Avg Retrieval Time": "Avg Time (s)"
+    })
 
-    metrics = ["Top-1 Acc", "Top-5 Acc", "Avg Time (s)"]
-    classes = sorted(df["Class"].unique())
-    methods = sorted(df["Method_Model"].unique())
+    metrics = ["Top-1 Acc", "Top-5 Acc", "Precision@5", "Recall@5", "mAP", "Avg Time (s)"]
+    methods = df["Method"].tolist()
 
     for metric in metrics:
-        plt.figure(figsize=(12, 6))
-
-        for method in methods:
-            method_df = df[df["Method_Model"] == method]
-            values = []
-
-            for cls in classes:
-                val = method_df[method_df["Class"] == cls][metric].values
-                values.append(val[0] if len(val) > 0 else None)
-
-            plt.plot(classes, values, marker='o', label=method)
-
-        plt.title(f"{metric} Comparison Across Classes")
-        plt.xlabel("Class")
+        plt.figure(figsize=(14, 6))
+        values = df[metric].tolist()
+        plt.bar(methods, values)
+        plt.xticks(rotation=90)
         plt.ylabel(metric)
-        plt.xticks(rotation=45)
-        plt.legend(title="Method")
-        plt.grid(True)
+        plt.title(f"{metric} Comparison Across Methods")
         plt.tight_layout()
 
-        filename = f"{metric.replace(' ', '_').lower()}_comparison.png"
+        filename = f"{metric.replace('@', 'at').replace(' ', '_').lower()}_barplot.png"
         plt.savefig(os.path.join(output_folder, filename))
         plt.close()
 
-    print(f"Line plots saved to: {output_folder}")
+    print(f"Bar plots saved to: {output_folder}")
 
 
 if __name__ == "__main__":
