@@ -13,6 +13,66 @@ from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
 
 from autoencoder import Autoencoder, BetterEncoder
+from tqdm import tqdm
+
+import open_clip
+from sklearn.metrics.pairwise import cosine_similarity
+
+
+class UnlabeledCLIPSiameseDataset(Dataset):
+    def __init__(self, image_dir, transform, device):
+        self.image_paths = [
+            os.path.join(image_dir, f)
+            for f in sorted(os.listdir(image_dir))
+            if f.lower().endswith((".jpg", ".jpeg", ".png"))
+        ]
+        self.transform = transform
+        self.device = device
+        self.model, _, self.preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='laion2b_s34b_b79k')
+        self.model = self.model.to(device).eval()
+
+        self.embeddings = self._compute_clip_embeddings()
+        self.similarity_matrix = cosine_similarity(self.embeddings)
+
+    def _compute_clip_embeddings(self):
+        embeddings = []
+        with torch.no_grad():
+            for path in tqdm(self.image_paths, desc="Computing CLIP embeddings"):
+                image = Image.open(path).convert("RGB")
+                image_tensor = self.preprocess(image).unsqueeze(0).to(self.device)
+                emb = self.model.encode_image(image_tensor).squeeze().cpu().numpy()
+                embeddings.append(emb)
+        return np.array(embeddings)
+
+    def __len__(self):
+        return len(self.image_paths) * 2  # one positive and one negative per anchor
+
+    def __getitem__(self, index):
+        real_idx = index // 2
+        is_positive = index % 2 == 0
+
+        anchor_path = self.image_paths[real_idx]
+        similarities = self.similarity_matrix[real_idx]
+
+        # Sort by similarity (descending)
+        sorted_indices = np.argsort(-similarities)
+
+        if is_positive:
+            candidates = sorted_indices[1:6]  # skip self (0), take top 5
+        else:
+            candidates = sorted_indices[200:]  # low similarity
+
+        if len(candidates) == 0:
+            return self.__getitem__((index + 1) % len(self))  # fallback
+
+        pair_idx = np.random.choice(candidates)
+        pair_path = self.image_paths[pair_idx]
+        label = 1 if is_positive else 0
+
+        anchor_img = Image.open(anchor_path).convert("RGB")
+        pair_img = Image.open(pair_path).convert("RGB")
+
+        return self.transform(anchor_img), self.transform(pair_img), torch.tensor([label], dtype=torch.float32)
 
 
 class SiameseDataset(Dataset):
@@ -223,7 +283,7 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
 
 def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_epochs=20, batch_size=16,
                           learning_rate=0.001, encoder_type="basic", encoder_path=None,
-                          early_stopping_patience=5):
+                          early_stopping_patience=5, use_clip_loader=False,):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -233,12 +293,20 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
     ])
+    if use_clip_loader:
+        print("Using CLIP-based unlabeled data loader...")
+        siamese_dataset = UnlabeledCLIPSiameseDataset(
+            image_dir=database_folders[0],
+            transform=transform,
+            device=device
+        )
 
-    datasets_list = [datasets.ImageFolder(root=folder) for folder in database_folders]
-    concat_dataset = ConcatDataset(datasets_list)
-    siamese_dataset = SiameseDataset(concat_dataset, transform)
+    else:
+        datasets_list = [datasets.ImageFolder(root=folder) for folder in database_folders]
+        concat_dataset = ConcatDataset(datasets_list)
+        siamese_dataset = SiameseDataset(concat_dataset, transform)
 
-    print(f"Dataset loaded from {', '.join(database_folders)}: {len(siamese_dataset.samples)} images found.")
+        print(f"Dataset loaded from {', '.join(database_folders)}: {len(siamese_dataset.samples)} images found.")
 
     val_size = int(0.2 * len(siamese_dataset))
     train_size = len(siamese_dataset) - val_size
@@ -371,6 +439,8 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", type=float, default=0.001)
     parser.add_argument("--embedding_dim", type=int, default=256)
     parser.add_argument("--es_patience", type=int, default=5, help="Number of epochs to wait before early stopping")
+    parser.add_argument("--use_clip_loader", action="store_true", help="Use CLIP-based dataloader for unlabeled images")
+
     args = parser.parse_args()
 
     model, transform, device = train_siamese_network(
@@ -382,16 +452,17 @@ if __name__ == "__main__":
         learning_rate=args.learning_rate,
         encoder_type=args.encoder_type,
         encoder_path=args.encoder_path,
-        early_stopping_patience=args.es_patience
+        early_stopping_patience=args.es_patience,
+        use_clip_loader=args.use_clip_loader
     )
-
-    extract_embeddings(
-        model=model,
-        transform=transform,
-        device=device,
-        database_folders=args.base_folders,
-        save_folder=args.save_folder,
-        embedding_dim=args.embedding_dim,
-        encoder_type=args.encoder_type
-    )
+    if not args.use_clip_loader:
+        extract_embeddings(
+            model=model,
+            transform=transform,
+            device=device,
+            database_folders=args.base_folders,
+            save_folder=args.save_folder,
+            embedding_dim=args.embedding_dim,
+            encoder_type=args.encoder_type
+        )
 
