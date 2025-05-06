@@ -18,46 +18,52 @@ SUPPORTED_METHODS = [
     "dhash", "phash",
     "pretrained_resnet", "pretrained_mobilenet", "pretrained_efficientnet",
     "autoencoder_basic", "autoencoder_resnet", "autoencoder_mobilenet", "autoencoder_efficientnet",
-    "siamese_basic", "siamese_resnet", "siamese_mobilenet", "siamese_efficientnet",
-    "siamese_autoencoder_basic", "siamese_autoencoder_resnet",
+    "siamese_basic", "siamese_better", "siamese_resnet", "siamese_mobilenet", "siamese_efficientnet",
+    "siamese_autoencoder_basic",  "siamese_autoencoder_better", "siamese_autoencoder_resnet",
     "siamese_autoencoder_mobilenet", "siamese_autoencoder_efficientnet"
 ]
 
 
 def load_model(method, database_folder, embedding_dim, device):
+    model_path = os.path.join(database_folder, f"{method}.pth")
+
     if "siamese" in method:
         encoder_type = method.split("_")[-1]
         encoder = build_encoder(encoder_type, embedding_dim, None, device)
-        model_path = os.path.join(database_folder, f"{method}.pth")
         if not os.path.exists(model_path):
             return None, None
         model = SiameseNetwork(encoder=encoder, embedding_dim=embedding_dim).to(device)
         model.load_state_dict(torch.load(model_path, map_location=device))
         transform = transforms.Compose([
-            transforms.Grayscale(num_output_channels=1),
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5], std=[0.5])
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
         ])
+
     elif "autoencoder" in method:
-        encoder_type = method.split("_")[-1]
-        model_path = os.path.join(database_folder, f"{method}.pth")
+        # Split to get encoder type (e.g., autoencoder_resnet)
+        encoder_type = "_".join(method.split("_")[1:])
         if not os.path.exists(model_path):
             return None, None
         model = Autoencoder(embedding_dim=embedding_dim, encoder_type=encoder_type).to(device)
         model.load_state_dict(torch.load(model_path, map_location=device))
         transform = transforms.Compose([
-            transforms.Grayscale(num_output_channels=1),
             transforms.Resize((224, 224)),
             transforms.ToTensor()
         ])
+
     elif method in ["dhash", "phash"]:
         model = method
         transform = None
+
     elif "pretrained" in method:
         model, transform = initialize_model(method.split("_")[-1])
+        model.eval()
+
     else:
         return None, None
+
     return model, transform
 
 
