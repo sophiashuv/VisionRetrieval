@@ -331,7 +331,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training")
     parser.add_argument("--embedding_dim", type=int, default=256, help="Size of embedding vector")
     parser.add_argument("--es_patience", type=int, default=5, help="Number of epochs to wait before early stopping")
-
+    parser.add_argument("--test_folder", nargs='+', help="Path to test images.")
     args = parser.parse_args()
 
     ensure_subfolder_exists(args.base_folders)
@@ -345,12 +345,19 @@ if __name__ == "__main__":
         encoder_type=args.encoder_type,
         early_stopping_patience=args.es_patience
     )
-
-    extract_embeddings(autoencoder,
-                       transform,
-                       device,
-                       args.base_folders,
-                       args.save_folder,
-                       args.embedding_dim,
-                       args.encoder_type)
-
+    if args.test_folder:
+        extract_embeddings(autoencoder,
+                           transform,
+                           device,
+                           args.base_folders,
+                           args.save_folder,
+                           args.embedding_dim,
+                           args.encoder_type)
+    else:
+        extract_embeddings(autoencoder,
+                           transform,
+                           device,
+                           args.test_folder,
+                           args.save_folder,
+                           args.embedding_dim,
+                           args.encoder_type)

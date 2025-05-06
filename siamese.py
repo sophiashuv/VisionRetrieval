@@ -440,7 +440,7 @@ if __name__ == "__main__":
     parser.add_argument("--embedding_dim", type=int, default=256)
     parser.add_argument("--es_patience", type=int, default=5, help="Number of epochs to wait before early stopping")
     parser.add_argument("--use_clip_loader", action="store_true", help="Use CLIP-based dataloader for unlabeled images")
-
+    parser.add_argument("--test_folder", nargs='+', help="Path to test images.")
     args = parser.parse_args()
 
     model, transform, device = train_siamese_network(
@@ -455,7 +455,18 @@ if __name__ == "__main__":
         early_stopping_patience=args.es_patience,
         use_clip_loader=args.use_clip_loader
     )
-    if not args.use_clip_loader:
+    if  args.test_folder:
+        extract_embeddings(
+            model=model,
+            transform=transform,
+            device=device,
+            database_folders=args.test_folder,
+            save_folder=args.save_folder,
+            embedding_dim=args.embedding_dim,
+            encoder_type=args.encoder_type
+        )
+
+    else:
         extract_embeddings(
             model=model,
             transform=transform,
