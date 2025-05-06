@@ -12,7 +12,7 @@ from torch.utils.data import Dataset, DataLoader, random_split, ConcatDataset
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
 
-from autoencoder import Autoencoder
+from autoencoder import Autoencoder, BetterEncoder
 
 
 class SiameseDataset(Dataset):
@@ -115,40 +115,40 @@ class SiameseNetwork(nn.Module):
         return self.forward_once(x1), self.forward_once(x2)
 
 
-class BetterEncoder(nn.Module):
-    def __init__(self, embedding_dim=256):
-        super(BetterEncoder, self).__init__()
-
-        self.features = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-
-            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-
-            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-
-            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU()
-        )
-
-        self.pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(256, embedding_dim)
-
-    def forward(self, x):
-        x = self.features(x)
-        x = self.pool(x)  # Now x has shape [B, 256, 1, 1]
-        x = x.view(x.size(0), -1)  # Flatten to [B, 256]
-        x = self.fc(x)  # Output shape [B, embedding_dim]
-        return x
+# class BetterEncoder(nn.Module):
+#     def __init__(self, embedding_dim=256):
+#         super(BetterEncoder, self).__init__()
+#
+#         self.features = nn.Sequential(
+#             nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
+#             nn.BatchNorm2d(32),
+#             nn.ReLU(),
+#             nn.MaxPool2d(2),
+#
+#             nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+#             nn.BatchNorm2d(64),
+#             nn.ReLU(),
+#             nn.MaxPool2d(2),
+#
+#             nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+#             nn.BatchNorm2d(128),
+#             nn.ReLU(),
+#             nn.MaxPool2d(2),
+#
+#             nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+#             nn.BatchNorm2d(256),
+#             nn.ReLU()
+#         )
+#
+#         self.pool = nn.AdaptiveAvgPool2d((1, 1))
+#         self.fc = nn.Linear(256, embedding_dim)
+#
+#     def forward(self, x):
+#         x = self.features(x)
+#         x = self.pool(x)  # Now x has shape [B, 256, 1, 1]
+#         x = x.view(x.size(0), -1)  # Flatten to [B, 256]
+#         x = self.fc(x)  # Output shape [B, embedding_dim]
+#         return x
 
 
 class ContrastiveLoss(nn.Module):
