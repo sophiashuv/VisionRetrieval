@@ -15,13 +15,12 @@ from hash import dhash, phash, hash_to_bitvector
 from pretrained import extract_features, initialize_model
 
 SUPPORTED_METHODS = [
-"siamese_better"
-    # "dhash", "phash",
-    # "pretrained_resnet", "pretrained_mobilenet", "pretrained_efficientnet",
-    # "autoencoder_basic", "autoencoder_resnet", "autoencoder_mobilenet", "autoencoder_efficientnet",
-    # "siamese_basic", "siamese_resnet", "siamese_mobilenet", "siamese_efficientnet",
-    # "siamese_autoencoder_basic",  "siamese_autoencoder_better", "siamese_autoencoder_resnet",
-    # "siamese_autoencoder_mobilenet", "siamese_autoencoder_efficientnet", "siamese_better"
+    "dhash", "phash",
+    "pretrained_resnet", "pretrained_mobilenet", "pretrained_efficientnet",
+    "autoencoder_basic", "autoencoder_resnet", "autoencoder_mobilenet", "autoencoder_efficientnet",
+    "siamese_basic", "siamese_resnet", "siamese_mobilenet", "siamese_efficientnet",
+    "siamese_autoencoder_basic",  "siamese_autoencoder_better", "siamese_autoencoder_resnet",
+    "siamese_autoencoder_mobilenet", "siamese_autoencoder_efficientnet", "siamese_better"
 ]
 
 
