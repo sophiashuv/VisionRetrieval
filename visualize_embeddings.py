@@ -69,13 +69,13 @@ def load_model(method, database_folder, embedding_dim, device):
 
 def get_embedding(file_path, method, model, transform, device):
     if "siamese" in method:
-        image = Image.open(file_path).convert("L")
+        image = Image.open(file_path).convert("RGB")
         image_tensor = transform(image).unsqueeze(0).to(device)
         with torch.no_grad():
             emb = model.forward_once(image_tensor)
         return emb.squeeze().cpu().numpy()
     elif "autoencoder" in method:
-        image = Image.open(file_path).convert("L")
+        image = Image.open(file_path).convert("RGB")
         image_tensor = transform(image).unsqueeze(0).to(device)
         with torch.no_grad():
             emb, _ = model(image_tensor)
