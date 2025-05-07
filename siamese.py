@@ -15,8 +15,7 @@ import torch.nn as nn
 from autoencoder import Autoencoder, BetterEncoder
 from tqdm import tqdm
 
-import open_clip
-from sklearn.metrics.pairwise import cosine_similarity
+
 
 class CSVPairSiameseDataset(Dataset):
     def __init__(self, folders, transform):
@@ -57,6 +56,8 @@ class CSVPairSiameseDataset(Dataset):
 
 class UnlabeledCLIPSiameseDataset(Dataset):
     def __init__(self, image_dir, transform, device):
+        import open_clip
+        from sklearn.metrics.pairwise import cosine_similarity
         self.image_paths = [
             os.path.join(image_dir, f)
             for f in sorted(os.listdir(image_dir))
