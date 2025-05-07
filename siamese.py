@@ -483,7 +483,7 @@ if __name__ == "__main__":
                         help="Path to pretrained encoder.pth weights")
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--learning_rate", type=float, default=0.001)
+    parser.add_argument("--learning_rate", type=float, default=0.0005)
     parser.add_argument("--embedding_dim", type=int, default=256)
     parser.add_argument("--es_patience", type=int, default=5, help="Number of epochs to wait before early stopping")
     parser.add_argument("--use_clip_loader", action="store_true", help="Use CLIP-based dataloader for unlabeled images")
