@@ -11,6 +11,8 @@ from torchvision import datasets, transforms, models
 from torch.utils.data import Dataset, DataLoader, random_split, ConcatDataset
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+
 
 from autoencoder import Autoencoder, BetterEncoder
 from tqdm import tqdm
@@ -363,6 +365,7 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
     print(f"Total trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
     criterion = ContrastiveLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=3, factor=0.5, verbose=True)
 
     log_dir = os.path.join(save_folder, f"siamese_tensorboard_{encoder_type}")
     writer = SummaryWriter(log_dir=log_dir)
@@ -405,11 +408,14 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
 
         avg_val_loss = val_loss / len(val_loader)
         accuracy = correct / total
+        scheduler.step(avg_val_loss)
+        current_lr = optimizer.param_groups[0]['lr']
 
         print(f"Epoch [{epoch + 1}/{num_epochs}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Val Acc: {accuracy:.4f}")
         writer.add_scalar("Loss/train", avg_train_loss, epoch + 1)
         writer.add_scalar("Loss/val", avg_val_loss, epoch + 1)
         writer.add_scalar("Accuracy/val", accuracy, epoch + 1)
+        writer.add_scalar("LearningRate", current_lr, epoch + 1)
 
         if avg_val_loss < best_loss:
             best_loss = avg_val_loss
