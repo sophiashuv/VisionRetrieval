@@ -189,7 +189,14 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
                     query_vector = query_vector.astype(np.float32).reshape(1, -1)
 
                 distances, indices = index.search(query_vector, 5)
-                top_5 = metadata.iloc[indices[0]]['image_path'].tolist()
+                retrieved_paths = metadata.iloc[indices[0]]['image_path'].tolist()
+                query_basename = os.path.basename(filename)
+                top_5 = [p for p in retrieved_paths if os.path.basename(p) != query_basename]
+
+                if len(top_5) < 1:
+                    print(f"Skipped: all top results for {filename} are the same image.")
+                    continue
+                top_5 = top_5[:5]
                 top_5_folders = [os.path.basename(os.path.dirname(p)) for p in top_5]
 
                 elapsed = time.time() - start
