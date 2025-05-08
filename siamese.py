@@ -326,34 +326,47 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    transform = transforms.Compose([
+    train_transform = transforms.Compose([
+        transforms.Resize((256, 256)),
+        transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomRotation(degrees=15),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
+    ])
+
+    val_transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
     ])
+
     if use_pair_csv_loader:
         print("Using CSV-based image pair dataset...")
-        siamese_dataset = CSVPairSiameseDataset(folders=database_folders, transform=transform)
-
+        full_dataset = CSVPairSiameseDataset(folders=database_folders, transform=train_transform)
     elif use_clip_loader:
         print("Using CLIP-based unlabeled data loader...")
-        siamese_dataset = UnlabeledCLIPSiameseDataset(
+        full_dataset = UnlabeledCLIPSiameseDataset(
             image_dir=database_folders[0],
-            transform=transform,
+            transform=train_transform,
             device=device
         )
-
     else:
         datasets_list = [datasets.ImageFolder(root=folder) for folder in database_folders]
         concat_dataset = ConcatDataset(datasets_list)
-        siamese_dataset = SiameseDataset(concat_dataset, transform)
+        full_dataset = SiameseDataset(concat_dataset, transform=train_transform)
+        print(f"Dataset loaded from {', '.join(database_folders)}: {len(full_dataset.samples)} images found.")
 
-        print(f"Dataset loaded from {', '.join(database_folders)}: {len(siamese_dataset.samples)} images found.")
+    val_size = int(0.2 * len(full_dataset))
+    train_size = len(full_dataset) - val_size
+    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
 
-    val_size = int(0.2 * len(siamese_dataset))
-    train_size = len(siamese_dataset) - val_size
-    train_dataset, val_dataset = random_split(siamese_dataset, [train_size, val_size])
+    # Override transform for validation set to ensure no augmentation during evaluation
+    if hasattr(val_dataset, 'dataset'):
+        val_dataset.dataset.transform = val_transform
 
     train_loader = DataLoader(train_dataset, shuffle=True, batch_size=batch_size)
     val_loader = DataLoader(val_dataset, shuffle=False, batch_size=batch_size)
