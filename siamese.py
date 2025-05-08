@@ -492,23 +492,34 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Siamese Network Training and Embedding Extraction")
     subparsers = parser.add_subparsers(dest="mode", required=True)
 
-    parser = argparse.ArgumentParser(description="Train a Siamese network and extract embeddings.")
-    parser.add_argument("--base_folders", nargs='+', required=True, help="One or more dataset base folders")
-    parser.add_argument("--save_folder", required=True, help="Folder to save model and embeddings")
-    parser.add_argument("--encoder_type", type=str, default="basic",
-                        choices=["basic", "resnet", "mobilenet", "efficientnet", "autoencoder_basic", "autoencoder_better",
-                                 "autoencoder_resnet", "autoencoder_mobilenet", "autoencoder_efficientnet", "better"],
-                        help="Type of encoder to use")
-    parser.add_argument("--encoder_path", type=str, default=None,
-                        help="Path to pretrained encoder.pth weights")
-    parser.add_argument("--num_epochs", type=int, default=100)
-    parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--learning_rate", type=float, default=0.0005)
-    parser.add_argument("--embedding_dim", type=int, default=256)
-    parser.add_argument("--es_patience", type=int, default=5, help="Number of epochs to wait before early stopping")
-    parser.add_argument("--use_clip_loader", action="store_true", help="Use CLIP-based dataloader for unlabeled images")
-    parser.add_argument("--use_pair_csv_loader", action="store_true", help="Use pre-generated CSV-based image pairs")
-    parser.add_argument("--test_folder", nargs='+', help="Path to test images.")
+    # Train subcommand
+    train_parser = subparsers.add_parser("train", help="Train the Siamese network")
+    train_parser.add_argument("--base_folders", nargs='+', required=True)
+    train_parser.add_argument("--save_folder", required=True)
+    train_parser.add_argument("--encoder_type", type=str, default="basic", choices=[
+        "basic", "resnet", "mobilenet", "efficientnet",
+        "autoencoder_basic", "autoencoder_better", "autoencoder_resnet", "autoencoder_mobilenet",
+        "autoencoder_efficientnet",
+        "better"
+    ])
+    train_parser.add_argument("--encoder_path", type=str, default=None)
+    train_parser.add_argument("--num_epochs", type=int, default=100)
+    train_parser.add_argument("--batch_size", type=int, default=16)
+    train_parser.add_argument("--learning_rate", type=float, default=0.0005)
+    train_parser.add_argument("--embedding_dim", type=int, default=256)
+    train_parser.add_argument("--es_patience", type=int, default=5)
+    train_parser.add_argument("--use_clip_loader", action="store_true")
+    train_parser.add_argument("--use_pair_csv_loader", action="store_true")
+    train_parser.add_argument("--test_folder", nargs='+', help="Optional: extract embeddings on test data")
+
+    # Extract subcommand
+    extract_parser = subparsers.add_parser("extract", help="Extract embeddings with a pretrained model")
+    extract_parser.add_argument("--base_folders", nargs='+', required=True)
+    extract_parser.add_argument("--save_folder", required=True)
+    extract_parser.add_argument("--encoder_type", type=str, required=True)
+    extract_parser.add_argument("--encoder_path", required=True)
+    extract_parser.add_argument("--embedding_dim", type=int, default=256)
+
     args = parser.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -526,7 +537,8 @@ if __name__ == "__main__":
             use_clip_loader=args.use_clip_loader,
             use_pair_csv_loader=args.use_pair_csv_loader
         )
-        if  args.test_folder:
+
+        if args.test_folder:
             extract_embeddings(
                 model=model,
                 transform=transform,
@@ -536,7 +548,6 @@ if __name__ == "__main__":
                 embedding_dim=args.embedding_dim,
                 encoder_type=args.encoder_type
             )
-
         else:
             extract_embeddings(
                 model=model,
@@ -547,6 +558,7 @@ if __name__ == "__main__":
                 embedding_dim=args.embedding_dim,
                 encoder_type=args.encoder_type
             )
+
     elif args.mode == "extract":
         transform = transforms.Compose([
             transforms.Resize((224, 224)),
@@ -567,4 +579,3 @@ if __name__ == "__main__":
             embedding_dim=args.embedding_dim,
             encoder_type=args.encoder_type
         )
-
