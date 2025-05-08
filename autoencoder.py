@@ -11,6 +11,8 @@ from torch.utils.data import DataLoader, random_split, ConcatDataset
 from torch import nn, optim
 from PIL import Image
 import matplotlib.pyplot as plt
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+
 
 
 def ensure_subfolder_exists(folders):
@@ -22,6 +24,7 @@ def ensure_subfolder_exists(folders):
                 file_path = os.path.join(database_folder, filename)
                 if filename.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".avif")):
                     shutil.move(file_path, os.path.join(default_class_folder, filename))
+
 
 class BetterEncoder(nn.Module):
     def __init__(self, embedding_dim=256):
@@ -58,6 +61,7 @@ class BetterEncoder(nn.Module):
         x = self.features(x)
         x = self.fc(x)
         return x
+
 
 class Autoencoder(nn.Module):
     def __init__(self, embedding_dim=256, encoder_type="basic"):
@@ -112,8 +116,6 @@ class Autoencoder(nn.Module):
                 nn.ConvTranspose2d(32, 3, 3, stride=1, padding=1),
                 nn.Sigmoid()
             )
-
-
         else:
             if encoder_type == "resnet":
                 model = models.resnet18(pretrained=True)
@@ -132,8 +134,6 @@ class Autoencoder(nn.Module):
                 model.features[0][0] = nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1, bias=False)
                 self.feature_extractor = model.features
                 encoder_output_size = 1280
-
-
             else:
                 raise ValueError(f"Unsupported encoder type: {encoder_type}")
 
@@ -168,13 +168,16 @@ def train_autoencoder(database_folders, save_folder, num_epochs=20, batch_size=1
     print(f"Using device: {device}")
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
-        transforms.ToTensor()
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     writer = SummaryWriter(log_dir=os.path.join(save_folder, f"autoencoder_{encoder_type}_tensorboard"))
     autoencoder = Autoencoder(embedding_dim, encoder_type).to(device)
     print(f"Total trainable parameters: {sum(p.numel() for p in autoencoder.parameters() if p.requires_grad):,}")
     criterion = nn.MSELoss(reduction='mean')
     optimizer = optim.Adam(autoencoder.parameters(), lr=0.001)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=3, factor=0.5, verbose=True)
+
     datasets_list = [datasets.ImageFolder(root=folder, transform=transform) for folder in database_folders]
     dataset = ConcatDataset(datasets_list)
     val_size = int(0.2 * len(dataset))
@@ -234,10 +237,14 @@ def train_autoencoder(database_folders, save_folder, num_epochs=20, batch_size=1
         writer.add_scalar("Loss/val", avg_val_loss, epoch + 1)
         writer.add_scalar("Accuracy/val", pixel_accuracy, epoch + 1)
 
+        scheduler.step(avg_val_loss)
+        current_lr = optimizer.param_groups[0]['lr']
+        writer.add_scalar("LearningRate", current_lr, epoch + 1)
+        print(f"Learning rate: {current_lr:.6f}")
+
         if (epoch + 1) % 5 == 0:
             save_reconstructions(val_images[:5], decoded[:5], save_folder, epoch + 1, encoder_type)
 
-        # Early Stopping based on validation loss
         if avg_val_loss < best_loss:
             best_loss = avg_val_loss
             patience_counter = 0
@@ -304,7 +311,6 @@ def extract_embeddings(autoencoder, transform, device, database_folders, save_fo
         return
 
     embeddings = np.array(embeddings, dtype=np.float32)
-
 
     index = faiss.IndexFlatIP(embedding_dim)
     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)

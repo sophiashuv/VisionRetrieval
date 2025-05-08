@@ -130,7 +130,9 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
     elif "autoencoder" in method:
         transform = transforms.Compose([
             transforms.Resize((224, 224)),
-            transforms.ToTensor()
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
         ])
 
         _,  encoder_type = method.split("_")
@@ -167,7 +169,6 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
                     query_vector = query_embedding.squeeze().cpu().numpy()
                     query_vector = query_vector / np.linalg.norm(query_vector)
                     query_vector = query_vector.astype(np.float32).reshape(1, -1)
-
 
                 elif "autoencoder" in method:
                     image = Image.open(file_path).convert("RGB")
