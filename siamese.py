@@ -489,6 +489,9 @@ def extract_embeddings(model, transform, device, database_folders, save_folder, 
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Siamese Network Training and Embedding Extraction")
+    subparsers = parser.add_subparsers(dest="mode", required=True)
+
     parser = argparse.ArgumentParser(description="Train a Siamese network and extract embeddings.")
     parser.add_argument("--base_folders", nargs='+', required=True, help="One or more dataset base folders")
     parser.add_argument("--save_folder", required=True, help="Folder to save model and embeddings")
@@ -507,32 +510,54 @@ if __name__ == "__main__":
     parser.add_argument("--use_pair_csv_loader", action="store_true", help="Use pre-generated CSV-based image pairs")
     parser.add_argument("--test_folder", nargs='+', help="Path to test images.")
     args = parser.parse_args()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model, transform, device = train_siamese_network(
-        database_folders=args.base_folders,
-        save_folder=args.save_folder,
-        embedding_dim=args.embedding_dim,
-        num_epochs=args.num_epochs,
-        batch_size=args.batch_size,
-        learning_rate=args.learning_rate,
-        encoder_type=args.encoder_type,
-        encoder_path=args.encoder_path,
-        early_stopping_patience=args.es_patience,
-        use_clip_loader=args.use_clip_loader,
-        use_pair_csv_loader=args.use_pair_csv_loader
-    )
-    if  args.test_folder:
-        extract_embeddings(
-            model=model,
-            transform=transform,
-            device=device,
-            database_folders=args.test_folder,
+    if args.mode == "train":
+        model, transform, device = train_siamese_network(
+            database_folders=args.base_folders,
             save_folder=args.save_folder,
             embedding_dim=args.embedding_dim,
-            encoder_type=args.encoder_type
+            num_epochs=args.num_epochs,
+            batch_size=args.batch_size,
+            learning_rate=args.learning_rate,
+            encoder_type=args.encoder_type,
+            encoder_path=args.encoder_path,
+            early_stopping_patience=args.es_patience,
+            use_clip_loader=args.use_clip_loader,
+            use_pair_csv_loader=args.use_pair_csv_loader
         )
+        if  args.test_folder:
+            extract_embeddings(
+                model=model,
+                transform=transform,
+                device=device,
+                database_folders=args.test_folder,
+                save_folder=args.save_folder,
+                embedding_dim=args.embedding_dim,
+                encoder_type=args.encoder_type
+            )
 
-    else:
+        else:
+            extract_embeddings(
+                model=model,
+                transform=transform,
+                device=device,
+                database_folders=args.base_folders,
+                save_folder=args.save_folder,
+                embedding_dim=args.embedding_dim,
+                encoder_type=args.encoder_type
+            )
+    elif args.mode == "extract":
+        transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
+        ])
+        encoder = build_encoder(args.encoder_type, args.embedding_dim, args.encoder_path, device)
+        model = SiameseNetwork(encoder=encoder, embedding_dim=args.embedding_dim).to(device)
+        model.load_state_dict(torch.load(args.encoder_path, map_location=device))
+
         extract_embeddings(
             model=model,
             transform=transform,
