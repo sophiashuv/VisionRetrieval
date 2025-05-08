@@ -5,7 +5,7 @@ import faiss
 import numpy as np
 import pandas as pd
 import scipy.fftpack
-
+import time
 
 def dhash(image, hash_size=8):
     resized = cv2.resize(image, (hash_size + 1, hash_size))
@@ -30,6 +30,7 @@ def hash_to_bitvector(hash_int, length=64):
 
 
 def compute_hash_faiss(base_folder, save_folder, method, hash_length=64):
+    start_time = time.time()
     vectors = []
     image_paths = []
 
@@ -73,6 +74,8 @@ def compute_hash_faiss(base_folder, save_folder, method, hash_length=64):
 
     print(f"Hash vectors stored in: {index_path}")
     print(f"Metadata saved in: {save_folder}/{method}_metadata.csv")
+    total_encoding_time = time.time() - start_time
+    print(f"Total encoding time: {total_encoding_time:.2f} seconds")
 
 
 if __name__ == "__main__":

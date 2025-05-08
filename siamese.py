@@ -12,6 +12,7 @@ from torch.utils.data import Dataset, DataLoader, random_split, ConcatDataset
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+import time
 
 
 from autoencoder import Autoencoder, BetterEncoder
@@ -386,8 +387,10 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
     best_loss = float("inf")
     patience_counter = 0
     best_model_path = os.path.join(save_folder, f"siamese_{encoder_type}.pth")
+    training_start_time = time.time()
 
     for epoch in range(num_epochs):
+
         model.train()
         train_loss = 0
 
@@ -442,12 +445,16 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
         if patience_counter >= early_stopping_patience:
             print(f"Early stopping at epoch {epoch + 1}")
             break
-
+    total_training_time = time.time() - training_start_time
+    print(f"Total training time: {total_training_time:.2f} seconds")
+    writer.add_scalar("Time/total_training_time_sec", total_training_time)
     writer.close()
+
     return model, val_transform, device
 
 
 def extract_embeddings(model, transform, device, database_folders, save_folder, embedding_dim=256, encoder_type="basic"):
+    start_time = time.time()
     model.eval()
     embeddings = []
     image_paths = []
@@ -486,6 +493,8 @@ def extract_embeddings(model, transform, device, database_folders, save_folder, 
         os.path.join(save_folder, f"siamese_{encoder_type}_metadata.csv"), index=False
     )
     print(f"Saved FAISS index and metadata to {save_folder}")
+    total_encoding_time = time.time() - start_time
+    print(f"Total encoding time: {total_encoding_time:.2f} seconds")
 
 
 if __name__ == "__main__":

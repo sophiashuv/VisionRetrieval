@@ -7,6 +7,7 @@ from torchvision import models
 from PIL import Image
 import numpy as np
 import pandas as pd
+import time
 
 
 def extract_features(image_path, model, transform, device):
@@ -46,6 +47,7 @@ def initialize_model(model_name):
 
 
 def compute_embeddings(base_folder, save_folder, model_name):
+    start_time = time.time()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model, transform = initialize_model(model_name)
 
@@ -81,6 +83,8 @@ def compute_embeddings(base_folder, save_folder, model_name):
 
     print(f"Embeddings saved: {index_file}")
     print(f"Metadata saved: {metadata_file}")
+    total_encoding_time = time.time() - start_time
+    print(f"Total encoding time: {total_encoding_time:.2f} seconds")
 
 
 if __name__ == "__main__":

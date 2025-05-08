@@ -12,7 +12,7 @@ from torch import nn, optim
 from PIL import Image
 import matplotlib.pyplot as plt
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-
+import time
 
 
 def ensure_subfolder_exists(folders):
@@ -193,7 +193,7 @@ def train_autoencoder(database_folders, save_folder, num_epochs=20, batch_size=1
     patience_counter = 0
     model_name = f"autoencoder_{encoder_type}.pth"
     model_path = os.path.join(save_folder, model_name)
-
+    training_start_time = time.time()
     for epoch in range(num_epochs):
         autoencoder.train()
         train_loss = 0
@@ -257,7 +257,9 @@ def train_autoencoder(database_folders, save_folder, num_epochs=20, batch_size=1
         if patience_counter >= early_stopping_patience:
             print(f"Early stopping at epoch {epoch + 1}")
             break
-
+    total_training_time = time.time() - training_start_time
+    print(f"Total training time: {total_training_time:.2f} seconds")
+    writer.add_scalar("Time/total_training_time_sec", total_training_time)
     writer.close()
     return autoencoder, transform, device
 
@@ -284,6 +286,8 @@ def save_reconstructions(originals, reconstructions, save_path, epoch, encoder_t
 
 
 def extract_embeddings(autoencoder, transform, device, database_folders, save_folder, embedding_dim=256, encoder_type="basic"):
+    start_time = time.time()
+
     autoencoder.to(device)
     autoencoder.eval()
     image_paths = []
@@ -325,6 +329,8 @@ def extract_embeddings(autoencoder, transform, device, database_folders, save_fo
 
     print(f"Embeddings saved in {index_file}")
     print(f"Metadata saved in {metadata_file}")
+    total_encoding_time = time.time() - start_time
+    print(f"Total encoding time: {total_encoding_time:.2f} seconds")
 
 
 if __name__ == "__main__":
