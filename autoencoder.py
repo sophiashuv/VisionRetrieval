@@ -305,8 +305,9 @@ def extract_embeddings(autoencoder, transform, device, database_folders, save_fo
 
     embeddings = np.array(embeddings, dtype=np.float32)
 
-    d = embedding_dim
-    index = faiss.IndexFlatL2(d)
+
+    index = faiss.IndexFlatIP(embedding_dim)
+    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
     index.add(embeddings)
 
     index_file = os.path.join(save_folder, f"autoencoder_{encoder_type}_faiss.index")

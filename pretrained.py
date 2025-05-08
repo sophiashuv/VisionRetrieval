@@ -67,7 +67,8 @@ def compute_embeddings(base_folder, save_folder, model_name):
 
     embeddings = np.array(embeddings, dtype=np.float32)
     d = embeddings.shape[1]
-    index = faiss.IndexFlatL2(d)
+    index = faiss.IndexFlatIP(d)
+    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
     index.add(embeddings)
 
     model_prefix = f"pretrained_{model_name}"
@@ -88,6 +89,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_folder", help="Where to save embeddings", required=True)
     parser.add_argument("--model", choices=["resnet", "efficientnet", "mobilenet"],
                         help="Model to use for feature extraction", required=True)
+
     args = parser.parse_args()
 
     compute_embeddings(args.base_folder, args.save_folder, args.model)

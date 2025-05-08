@@ -444,7 +444,7 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
             break
 
     writer.close()
-    return model, transform, device
+    return model, val_transform, device
 
 
 def extract_embeddings(model, transform, device, database_folders, save_folder, embedding_dim=256, encoder_type="basic"):
@@ -462,9 +462,11 @@ def extract_embeddings(model, transform, device, database_folders, save_folder, 
                         try:
                             image = Image.open(file_path).convert("RGB")
                             image_tensor = transform(image).unsqueeze(0).to(device)
+                            model.eval()
                             with torch.no_grad():
                                 emb = model.forward_once(image_tensor)
                             embeddings.append(emb.squeeze().cpu().numpy())
+
                             image_paths.append(file_path)
                         except Exception as e:
                             print(f"Error processing {file_path}: {e}")
@@ -474,7 +476,9 @@ def extract_embeddings(model, transform, device, database_folders, save_folder, 
         return
 
     embeddings = np.array(embeddings, dtype=np.float32)
-    index = faiss.IndexFlatL2(embedding_dim)
+
+    index = faiss.IndexFlatIP(embedding_dim)
+    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
     index.add(embeddings)
 
     faiss.write_index(index, os.path.join(save_folder, f"siamese_{encoder_type}_faiss.index"))
@@ -515,7 +519,7 @@ if __name__ == "__main__":
         encoder_path=args.encoder_path,
         early_stopping_patience=args.es_patience,
         use_clip_loader=args.use_clip_loader,
-        use_pair_csv_loader = args.use_pair_csv_loader
+        use_pair_csv_loader=args.use_pair_csv_loader
     )
     if  args.test_folder:
         extract_embeddings(

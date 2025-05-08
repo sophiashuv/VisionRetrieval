@@ -164,21 +164,28 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
                     image_tensor = transform(image).unsqueeze(0).to(device)
                     with torch.no_grad():
                         query_embedding = model.forward_once(image_tensor)
-                    query_vector = query_embedding.squeeze().cpu().numpy().astype(np.float32).reshape(1, -1)
+                    query_vector = query_embedding.squeeze().cpu().numpy()
+                    query_vector = query_vector / np.linalg.norm(query_vector)
+                    query_vector = query_vector.astype(np.float32).reshape(1, -1)
+
 
                 elif "autoencoder" in method:
                     image = Image.open(file_path).convert("RGB")
                     image_tensor = transform(image).unsqueeze(0).to(device)
                     with torch.no_grad():
                         query_embedding, _ = model(image_tensor)
-                        query_vector = query_embedding.squeeze().cpu().numpy().astype(np.float32).reshape(1, -1)
+                        query_vector = query_embedding.squeeze().cpu().numpy()
+                        query_vector = query_vector / np.linalg.norm(query_vector)
+                        query_vector = query_vector.astype(np.float32).reshape(1, -1)
                 elif method in ["dhash", "phash"]:
                     image = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
                     hash_func = dhash if method == "dhash" else phash
                     query_vector = hash_to_bitvector(hash_func(image)).reshape(1, -1).astype(np.uint8)
                 elif "pretrained" in method:
                     query_embedding = extract_features(file_path, model, transform, device)
-                    query_vector = query_embedding.astype(np.float32).reshape(1, -1)
+                    query_vector = query_embedding.squeeze().cpu().numpy()
+                    query_vector = query_vector / np.linalg.norm(query_vector)
+                    query_vector = query_vector.astype(np.float32).reshape(1, -1)
 
                 distances, indices = index.search(query_vector, 5)
                 top_5 = metadata.iloc[indices[0]]['image_path'].tolist()
