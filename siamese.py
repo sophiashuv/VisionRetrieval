@@ -387,7 +387,7 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
     best_model_path = os.path.join(save_folder, f"siamese_{encoder_type}.pth")
     training_start_time = time.time()
 
-    freeze_epochs = 5
+    freeze_epochs = 10
 
     for epoch in range(num_epochs):
         if epoch == freeze_epochs:
