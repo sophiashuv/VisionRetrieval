@@ -322,10 +322,10 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
 
     train_transform = transforms.Compose([
         transforms.Resize((256, 256)),
-        transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomRotation(degrees=15),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
+        # transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
+        # transforms.RandomHorizontalFlip(p=0.5),
+        # transforms.RandomRotation(degrees=15),
+        # transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
@@ -367,6 +367,9 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
 
     encoder = build_encoder(encoder_type, embedding_dim, encoder_path, device)
     print(f"Using encoder: {encoder_type}")
+    print("Trainable parameters:")
+    for name, param in encoder.named_parameters():
+        print(f"{name}: requires_grad = {param.requires_grad}")
 
     use_head = not (encoder_type.startswith("autoencoder") or encoder_type in ["resnet", "mobilenet", "efficientnet"])
     model = SiameseNetwork(encoder=encoder, embedding_dim=embedding_dim, use_head=use_head).to(device)
