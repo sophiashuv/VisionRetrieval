@@ -184,35 +184,30 @@ class SiameseDataset(Dataset):
 
 
 class SiameseNetwork(nn.Module):
-    def __init__(self, encoder=None, embedding_dim=256):
+    def __init__(self, encoder=None, use_head=False, embedding_dim=256):
         super(SiameseNetwork, self).__init__()
-        if encoder is not None:
-            self.cnn = encoder
-        else:
-            self.cnn = torch.nn.Sequential(
-                torch.nn.Conv2d(3, 32, 3, stride=2, padding=1),
-                torch.nn.ReLU(),
-                torch.nn.Conv2d(32, 64, 3, stride=2, padding=1),
-                torch.nn.ReLU(),
-                torch.nn.Conv2d(64, 128, 3, stride=2, padding=1),
-                torch.nn.ReLU(),
-                torch.nn.Flatten(),
-                torch.nn.Linear(128 * 28 * 28, embedding_dim)
+        self.cnn = encoder
+
+        # Only add head if requested (e.g., for non-pretrained or special cases)
+        if use_head:
+            self.head = nn.Sequential(
+                nn.Linear(embedding_dim, embedding_dim),
+                nn.ReLU(),
+                nn.Linear(embedding_dim, embedding_dim)
             )
-        self.head = nn.Sequential(
-            nn.Linear(embedding_dim, embedding_dim),
-            nn.ReLU(),
-            nn.Linear(embedding_dim, embedding_dim)
-        )
+        else:
+            self.head = None
 
     def forward_once(self, x):
         x = self.cnn(x)
         x = nn.functional.normalize(x, p=2, dim=1)
-        x = self.head(x)
+        if self.head:
+            x = self.head(x)
         return x
 
     def forward(self, x1, x2):
         return self.forward_once(x1), self.forward_once(x2)
+
 
 
 # class BetterEncoder(nn.Module):
@@ -265,55 +260,53 @@ class ContrastiveLoss(nn.Module):
 def build_encoder(encoder_type, embedding_dim, encoder_path, device):
     if "autoencoder" in encoder_type:
         _, encoder = encoder_type.split("_")
-        autoencoder = Autoencoder(embedding_dim=embedding_dim,
-                                  encoder_type=encoder).to(device)
+        autoencoder = Autoencoder(embedding_dim=embedding_dim, encoder_type=encoder).to(device)
         autoencoder.load_state_dict(torch.load(encoder_path, map_location=device))
         autoencoder.eval()
         return autoencoder.encoder
+
     elif encoder_type == "resnet":
         model = models.resnet18(pretrained=True)
-        model.conv1 = torch.nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        encoder = torch.nn.Sequential(*list(model.children())[:-1])
-        return torch.nn.Sequential(
-            encoder,
-            torch.nn.AdaptiveAvgPool2d((1, 1)),
-            torch.nn.Flatten(),
-            torch.nn.Linear(model.fc.in_features, embedding_dim)
+        modules = list(model.children())[:-1]
+        encoder = nn.Sequential(
+            *modules,
+            nn.Flatten(),
+            nn.Linear(model.fc.in_features, embedding_dim)
         )
+        return encoder
 
     elif encoder_type == "mobilenet":
         model = models.mobilenet_v2(pretrained=True)
-        model.features[0][0] = torch.nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1, bias=False)
-        encoder = model.features
-        return torch.nn.Sequential(
-            encoder,
-            torch.nn.AdaptiveAvgPool2d((1, 1)),
-            torch.nn.Flatten(),
-            torch.nn.Linear(1280, embedding_dim)
+        encoder = nn.Sequential(
+            model.features,
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Linear(model.last_channel, embedding_dim)
         )
+        return encoder
 
     elif encoder_type == "efficientnet":
         model = models.efficientnet_b0(pretrained=True)
-        model.features[0][0] = torch.nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1, bias=False)
-        encoder = model.features
-        return torch.nn.Sequential(
-            encoder,
-            torch.nn.AdaptiveAvgPool2d((1, 1)),
-            torch.nn.Flatten(),
-            torch.nn.Linear(1280, embedding_dim)
+        encoder = nn.Sequential(
+            model.features,
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Linear(model.classifier[1].in_features, embedding_dim)
         )
+        return encoder
 
     elif encoder_type == "basic":
-        return torch.nn.Sequential(
-            torch.nn.Conv2d(3, 32, 3, stride=2, padding=1),
-            torch.nn.ReLU(),
-            torch.nn.Conv2d(32, 64, 3, stride=2, padding=1),
-            torch.nn.ReLU(),
-            torch.nn.Conv2d(64, 128, 3, stride=2, padding=1),
-            torch.nn.ReLU(),
-            torch.nn.Flatten(),
-            torch.nn.Linear(128 * 28 * 28, embedding_dim)
+        return nn.Sequential(
+            nn.Conv2d(3, 32, 3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, 3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, 3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(128 * 28 * 28, embedding_dim)
         )
+
     elif encoder_type == "better":
         return BetterEncoder(embedding_dim=embedding_dim)
 
@@ -375,7 +368,9 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
     encoder = build_encoder(encoder_type, embedding_dim, encoder_path, device)
     print(f"Using encoder: {encoder_type}")
 
-    model = SiameseNetwork(encoder=encoder, embedding_dim=embedding_dim).to(device)
+    use_head = not (encoder_type.startswith("autoencoder") or encoder_type in ["resnet", "mobilenet", "efficientnet"])
+    model = SiameseNetwork(encoder=encoder, embedding_dim=embedding_dim, use_head=use_head).to(device)
+
     print(f"Total trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
     criterion = ContrastiveLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
