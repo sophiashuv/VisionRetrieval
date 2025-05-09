@@ -479,7 +479,7 @@ def extract_embeddings(model, transform, device, database_folders, save_folder, 
 
     embeddings = np.array(embeddings, dtype=np.float32)
 
-    index = faiss.IndexFlatIP(embedding_dim)
+    index = faiss.IndexFlatIP(embeddings.shape[1])
     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
     index.add(embeddings)
 
