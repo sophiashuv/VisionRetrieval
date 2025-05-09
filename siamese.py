@@ -184,19 +184,18 @@ class SiameseDataset(Dataset):
 
 
 class SiameseNetwork(nn.Module):
-    def __init__(self, encoder=None, use_head=False, embedding_dim=256):
+    def __init__(self, encoder, use_head=False, embedding_dim=256, encoder_output_dim=1280):
         super(SiameseNetwork, self).__init__()
         self.cnn = encoder
+        self.head = None
 
-        # Only add head if requested (e.g., for non-pretrained or special cases)
         if use_head:
             self.head = nn.Sequential(
-                nn.Linear(embedding_dim, embedding_dim),
+                nn.Linear(encoder_output_dim, embedding_dim),
                 nn.ReLU(),
                 nn.Linear(embedding_dim, embedding_dim)
             )
-        else:
-            self.head = None
+        self.encoder_output_dim = encoder_output_dim
 
     def forward_once(self, x):
         x = self.cnn(x)
@@ -207,6 +206,7 @@ class SiameseNetwork(nn.Module):
 
     def forward(self, x1, x2):
         return self.forward_once(x1), self.forward_once(x2)
+
 
 
 
@@ -358,7 +358,19 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
 
     encoder = build_encoder(encoder_type, embedding_dim, encoder_path, device)
     use_head = True
-    model = SiameseNetwork(encoder=encoder, embedding_dim=embedding_dim, use_head=use_head).to(device)
+    # Determine output dimension from encoder type
+    if encoder_type == "mobilenet":
+        encoder_output_dim = 1280
+    elif encoder_type == "resnet":
+        encoder_output_dim = 512
+    elif encoder_type == "efficientnet":
+        encoder_output_dim = 1280
+    else:
+        encoder_output_dim = embedding_dim
+
+    use_head = True
+    model = SiameseNetwork(encoder=encoder, embedding_dim=embedding_dim, use_head=use_head,
+                           encoder_output_dim=encoder_output_dim).to(device)
 
     # Freeze encoder initially
     for param in model.cnn.parameters():
