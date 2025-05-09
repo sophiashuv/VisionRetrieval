@@ -175,7 +175,7 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
                     image = Image.open(file_path).convert("RGB")
                     image_tensor = transform(image).unsqueeze(0).to(device)
                     with torch.no_grad():
-                        query_embedding, _ = model(image_tensor)
+                        query_embedding, _ = model(image_tensor, current_epoch=999)
                         query_vector = query_embedding.squeeze().cpu().numpy()
                         query_vector = query_vector / np.linalg.norm(query_vector)
                         query_vector = query_vector.astype(np.float32).reshape(1, -1)

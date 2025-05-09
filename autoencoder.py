@@ -64,10 +64,12 @@ class BetterEncoder(nn.Module):
 
 
 class Autoencoder(nn.Module):
-    def __init__(self, embedding_dim=256, encoder_type="basic"):
+    def __init__(self, embedding_dim=256, encoder_type="basic", freeze_encoder_epochs=5):
         super(Autoencoder, self).__init__()
         self.encoder_type = encoder_type
         self.embedding_dim = embedding_dim
+        self.freeze_encoder_epochs = freeze_encoder_epochs
+        self.encoder_frozen = False
 
         if encoder_type == "basic":
             self.encoder = nn.Sequential(
@@ -80,7 +82,6 @@ class Autoencoder(nn.Module):
                 nn.Flatten(),
                 nn.Linear(128 * 28 * 28, embedding_dim)
             )
-            encoder_output_size = embedding_dim
             self.decoder = nn.Sequential(
                 nn.Linear(embedding_dim, 128 * 28 * 28),
                 nn.ReLU(),
@@ -92,6 +93,7 @@ class Autoencoder(nn.Module):
                 nn.ConvTranspose2d(32, 3, 3, stride=2, padding=1, output_padding=1),
                 nn.Sigmoid()
             )
+
         elif encoder_type == "better":
             self.encoder = BetterEncoder(embedding_dim=embedding_dim)
             self.decoder = nn.Sequential(
@@ -102,25 +104,23 @@ class Autoencoder(nn.Module):
                 nn.BatchNorm2d(128),
                 nn.ReLU(),
                 nn.Upsample(scale_factor=2, mode='nearest'),
-
                 nn.ConvTranspose2d(128, 64, 3, stride=1, padding=1),
                 nn.BatchNorm2d(64),
                 nn.ReLU(),
                 nn.Upsample(scale_factor=2, mode='nearest'),
-
                 nn.ConvTranspose2d(64, 32, 3, stride=1, padding=1),
                 nn.BatchNorm2d(32),
                 nn.ReLU(),
                 nn.Upsample(scale_factor=2, mode='nearest'),
-
                 nn.ConvTranspose2d(32, 3, 3, stride=1, padding=1),
                 nn.Sigmoid()
             )
-        else:
+
+        elif encoder_type in ["resnet", "mobilenet", "efficientnet"]:
             if encoder_type == "resnet":
                 model = models.resnet18(pretrained=True)
                 model.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
-                self.feature_extractor = nn.Sequential(*list(model.children())[:-1])  # Remove FC layer
+                self.feature_extractor = nn.Sequential(*list(model.children())[:-1])
                 encoder_output_size = model.fc.in_features
 
             elif encoder_type == "mobilenet":
@@ -134,29 +134,53 @@ class Autoencoder(nn.Module):
                 model.features[0][0] = nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1, bias=False)
                 self.feature_extractor = model.features
                 encoder_output_size = 1280
-            else:
-                raise ValueError(f"Unsupported encoder type: {encoder_type}")
 
             self.encoder = nn.Sequential(
                 self.feature_extractor,
                 nn.AdaptiveAvgPool2d((1, 1)),
-                nn.Flatten(),
-                nn.Linear(encoder_output_size, embedding_dim)
+                nn.Flatten()
             )
 
             self.decoder = nn.Sequential(
-                nn.Linear(embedding_dim, 128 * 28 * 28),
+                nn.Linear(encoder_output_size, 256 * 28 * 28),
                 nn.ReLU(),
-                nn.Unflatten(1, (128, 28, 28)),
-                nn.ConvTranspose2d(128, 64, 3, stride=2, padding=1, output_padding=1),
+                nn.Unflatten(1, (256, 28, 28)),
+                nn.ConvTranspose2d(256, 128, 3, stride=1, padding=1),
+                nn.BatchNorm2d(128),
                 nn.ReLU(),
-                nn.ConvTranspose2d(64, 32, 3, stride=2, padding=1, output_padding=1),
+                nn.Upsample(scale_factor=2, mode='nearest'),
+                nn.ConvTranspose2d(128, 64, 3, stride=1, padding=1),
+                nn.BatchNorm2d(64),
                 nn.ReLU(),
-                nn.ConvTranspose2d(32, 3, 3, stride=2, padding=1, output_padding=1),
+                nn.Upsample(scale_factor=2, mode='nearest'),
+                nn.ConvTranspose2d(64, 32, 3, stride=1, padding=1),
+                nn.BatchNorm2d(32),
+                nn.ReLU(),
+                nn.Upsample(scale_factor=2, mode='nearest'),
+                nn.ConvTranspose2d(32, 3, 3, stride=1, padding=1),
                 nn.Sigmoid()
             )
 
-    def forward(self, x):
+        else:
+            raise ValueError(f"Unsupported encoder type: {encoder_type}")
+
+    def maybe_freeze_encoder(self, current_epoch):
+        if self.encoder_type in ["resnet", "mobilenet", "efficientnet"]:
+            if current_epoch < self.freeze_encoder_epochs:
+                if not self.encoder_frozen:
+                    for param in self.encoder.parameters():
+                        param.requires_grad = False
+                    self.encoder_frozen = True
+                    print(f"Encoder frozen (epoch {current_epoch})")
+            elif self.encoder_frozen:
+                for param in self.encoder.parameters():
+                    param.requires_grad = True
+                self.encoder_frozen = False
+                print(f"Encoder unfrozen at epoch {current_epoch}")
+
+    def forward(self, x, current_epoch=None):
+        if current_epoch is not None:
+            self.maybe_freeze_encoder(current_epoch)
         encoded = self.encoder(x)
         decoded = self.decoder(encoded)
         return encoded, decoded
@@ -201,7 +225,7 @@ def train_autoencoder(database_folders, save_folder, num_epochs=20, batch_size=1
         for images, _ in train_loader:
             images = images.to(device)
             optimizer.zero_grad()
-            _, decoded = autoencoder(images)
+            _, decoded = autoencoder(images, current_epoch=epoch)
             loss = criterion(decoded, images)
             loss.backward()
             optimizer.step()
@@ -218,11 +242,10 @@ def train_autoencoder(database_folders, save_folder, num_epochs=20, batch_size=1
         with torch.no_grad():
             for val_images, _ in val_loader:
                 val_images = val_images.to(device)
-                _, decoded = autoencoder(val_images)
+                _, decoded = autoencoder(val_images, current_epoch=epoch)
                 loss = criterion(decoded, val_images)
                 val_loss += loss.item()
 
-                # Accuracy: count how many pixels are close enough
                 pred = decoded > 0.5
                 truth = val_images > 0.5
                 correct_pixels += torch.sum(pred == truth).item()
