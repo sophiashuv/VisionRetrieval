@@ -180,7 +180,7 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
                     with torch.no_grad():
                         query_embedding = model.forward_once(image_tensor)
                     query_vector = query_embedding.squeeze().cpu().numpy()
-                    query_vector = query_vector / np.linalg.norm(query_vector)
+                    # query_vector = query_vector / np.linalg.norm(query_vector)
                     query_vector = query_vector.astype(np.float32).reshape(1, -1)
 
                 elif "autoencoder" in method:

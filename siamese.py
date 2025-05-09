@@ -199,7 +199,7 @@ class SiameseNetwork(nn.Module):
 
     def forward_once(self, x):
         x = self.cnn(x)
-        x = nn.functional.normalize(x, p=2, dim=1)
+        # x = nn.functional.normalize(x, p=2, dim=1)
         if self.head:
             x = self.head(x)
         return x
@@ -493,8 +493,9 @@ def extract_embeddings(model, transform, device, database_folders, save_folder, 
 
     embeddings = np.array(embeddings, dtype=np.float32)
 
-    index = faiss.IndexFlatIP(embeddings.shape[1])
-    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+    # index = faiss.IndexFlatIP(embeddings.shape[1])
+    # embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+    index = faiss.IndexFlatL2(embeddings.shape[1])
     index.add(embeddings)
 
     faiss.write_index(index, os.path.join(save_folder, f"siamese_{encoder_type}_faiss.index"))
