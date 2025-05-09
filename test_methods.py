@@ -122,7 +122,8 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
 
         models = method.split("_")
         encoder = build_encoder(models[-1], embedding_dim, None, device)
-        siamese_model = SiameseNetwork(encoder=encoder, embedding_dim=embedding_dim).to(device)
+        use_head = models[-1] in ["basic", "better"]
+        siamese_model = SiameseNetwork(encoder=encoder, embedding_dim=embedding_dim, use_head=use_head).to(device)
 
         siamese_model.load_state_dict(torch.load(os.path.join(database_folder, f"{method}.pth"), map_location=device))
         siamese_model.eval()
