@@ -287,17 +287,25 @@ def train_autoencoder(database_folders, save_folder, num_epochs=20, batch_size=1
     return autoencoder, transform, device
 
 
-def save_reconstructions(originals, reconstructions, save_path, epoch, encoder_type):
-    originals = originals.cpu().numpy()
-    reconstructions = reconstructions.cpu().detach().numpy()
+def denormalize(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
+    # In-place denormalization for visualization
+    for t, m, s in zip(tensor, mean, std):
+        t.mul_(s).add_(m)
+    return tensor
 
-    fig, axes = plt.subplots(2, 5, figsize=(12, 4))
-    for i in range(5):
-        axes[0, i].imshow(np.transpose(originals[i], (1, 2, 0)))
+def save_reconstructions(originals, reconstructions, save_path, epoch, encoder_type):
+    n = min(originals.shape[0], 5)
+    fig, axes = plt.subplots(2, n, figsize=(3 * n, 4))
+
+    for i in range(n):
+        orig_tensor = denormalize(originals[i].cpu().clone())
+        recon_tensor = denormalize(reconstructions[i].cpu().clone())
+
+        axes[0, i].imshow(np.transpose(orig_tensor.numpy(), (1, 2, 0)))
         axes[0, i].axis("off")
         axes[0, i].set_title("Original")
 
-        axes[1, i].imshow(np.transpose(reconstructions[i], (1, 2, 0)))
+        axes[1, i].imshow(np.transpose(recon_tensor.numpy(), (1, 2, 0)))
         axes[1, i].axis("off")
         axes[1, i].set_title("Reconstructed")
 
@@ -306,7 +314,6 @@ def save_reconstructions(originals, reconstructions, save_path, epoch, encoder_t
     plt.savefig(out_path)
     plt.close()
     print(f"Saved reconstruction preview to: {out_path}")
-
 
 def extract_embeddings(autoencoder, transform, device, database_folders, save_folder, embedding_dim=256, encoder_type="basic"):
     start_time = time.time()
@@ -339,7 +346,7 @@ def extract_embeddings(autoencoder, transform, device, database_folders, save_fo
 
     embeddings = np.array(embeddings, dtype=np.float32)
 
-    index = faiss.IndexFlatIP(embedding_dim)
+    index = faiss.IndexFlatIP(embeddings.shape[1])
     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
     index.add(embeddings)
 
@@ -385,7 +392,7 @@ if __name__ == "__main__":
         extract_embeddings(autoencoder,
                            transform,
                            device,
-                           args.base_folders,
+                           args.test_folder,
                            args.save_folder,
                            args.embedding_dim,
                            args.encoder_type)
@@ -393,7 +400,7 @@ if __name__ == "__main__":
         extract_embeddings(autoencoder,
                            transform,
                            device,
-                           args.test_folder,
+                           args.base_folders,
                            args.save_folder,
                            args.embedding_dim,
                            args.encoder_type)

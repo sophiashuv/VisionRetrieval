@@ -271,7 +271,7 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
         encoder = nn.Sequential(
             *modules,
             nn.Flatten(),
-            nn.Linear(model.fc.in_features, embedding_dim)
+            # nn.Linear(model.fc.in_features, embedding_dim)
         )
         return encoder
 
@@ -281,7 +281,7 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
             model.features,
             nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten(),
-            nn.Linear(model.last_channel, embedding_dim)
+            # nn.Linear(model.last_channel, embedding_dim)
         )
         return encoder
 
@@ -291,7 +291,7 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
             model.features,
             nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten(),
-            nn.Linear(model.classifier[1].in_features, embedding_dim)
+            # nn.Linear(model.classifier[1].in_features, embedding_dim)
         )
         return encoder
 
