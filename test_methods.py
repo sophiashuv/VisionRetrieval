@@ -183,8 +183,7 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
                     hash_func = dhash if method == "dhash" else phash
                     query_vector = hash_to_bitvector(hash_func(image)).reshape(1, -1).astype(np.uint8)
                 elif "pretrained" in method:
-                    query_embedding = extract_features(file_path, model, transform, device)
-                    query_vector = query_embedding.squeeze().cpu().numpy()
+                    query_vector = extract_features(file_path, model, transform, device)
                     query_vector = query_vector / np.linalg.norm(query_vector)
                     query_vector = query_vector.astype(np.float32).reshape(1, -1)
 
