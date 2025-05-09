@@ -314,6 +314,10 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
         raise ValueError(f"Unknown encoder type: {encoder_type}")
 
 
+# (Omitting unchanged imports and classes for brevity)
+
+# Modify train_siamese_network to freeze encoder for a few epochs, then unfreeze it
+
 def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_epochs=20, batch_size=16,
                           learning_rate=0.001, encoder_type="basic", encoder_path=None,
                           early_stopping_patience=5, use_clip_loader=False, use_pair_csv_loader=False):
@@ -322,43 +326,30 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
 
     train_transform = transforms.Compose([
         transforms.Resize((256, 256)),
-        # transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
-        # transforms.RandomHorizontalFlip(p=0.5),
-        # transforms.RandomRotation(degrees=15),
-        # transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
     val_transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
     if use_pair_csv_loader:
-        print("Using CSV-based image pair dataset...")
         full_dataset = CSVPairSiameseDataset(folders=database_folders, transform=train_transform)
     elif use_clip_loader:
-        print("Using CLIP-based unlabeled data loader...")
         full_dataset = UnlabeledCLIPSiameseDataset(
-            image_dir=database_folders[0],
-            transform=train_transform,
-            device=device
-        )
+            image_dir=database_folders[0], transform=train_transform, device=device)
     else:
         datasets_list = [datasets.ImageFolder(root=folder) for folder in database_folders]
         concat_dataset = ConcatDataset(datasets_list)
         full_dataset = SiameseDataset(concat_dataset, transform=train_transform)
-        print(f"Dataset loaded from {', '.join(database_folders)}: {len(full_dataset.samples)} images found.")
 
     val_size = int(0.2 * len(full_dataset))
     train_size = len(full_dataset) - val_size
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
 
-    # Override transform for validation set to ensure no augmentation during evaluation
     if hasattr(val_dataset, 'dataset'):
         val_dataset.dataset.transform = val_transform
 
@@ -366,17 +357,14 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
     val_loader = DataLoader(val_dataset, shuffle=False, batch_size=batch_size)
 
     encoder = build_encoder(encoder_type, embedding_dim, encoder_path, device)
-    print(f"Using encoder: {encoder_type}")
-    print("Trainable parameters:")
-    for name, param in encoder.named_parameters():
-        print(f"{name}: requires_grad = {param.requires_grad}")
-
-    use_head = not (encoder_type.startswith("autoencoder") or encoder_type in ["resnet", "mobilenet", "efficientnet"])
+    use_head = True
     model = SiameseNetwork(encoder=encoder, embedding_dim=embedding_dim, use_head=use_head).to(device)
 
-    print(f"Total trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
-    criterion = ContrastiveLoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    # Freeze encoder initially
+    for param in model.cnn.parameters():
+        param.requires_grad = False
+
+    optimizer = optim.Adam(model.head.parameters(), lr=learning_rate)
     scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=3, factor=0.5, verbose=True)
 
     log_dir = os.path.join(save_folder, f"siamese_tensorboard_{encoder_type}")
@@ -387,16 +375,25 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
     best_model_path = os.path.join(save_folder, f"siamese_{encoder_type}.pth")
     training_start_time = time.time()
 
+    freeze_epochs = 5
+
     for epoch in range(num_epochs):
+        if epoch == freeze_epochs:
+            print("\nUnfreezing encoder for fine-tuning\n")
+            for param in model.cnn.parameters():
+                param.requires_grad = True
+            optimizer = optim.Adam([
+                {'params': model.head.parameters(), 'lr': learning_rate},
+                {'params': model.cnn.parameters(), 'lr': learning_rate * 0.1}
+            ])
 
         model.train()
         train_loss = 0
-
         for img1, img2, label in train_loader:
             img1, img2, label = img1.to(device), img2.to(device), label.to(device)
             optimizer.zero_grad()
             output1, output2 = model(img1, img2)
-            loss = criterion(output1, output2, label)
+            loss = ContrastiveLoss()(output1, output2, label)
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
@@ -412,7 +409,7 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
             for img1, img2, label in val_loader:
                 img1, img2, label = img1.to(device), img2.to(device), label.to(device)
                 output1, output2 = model(img1, img2)
-                loss = criterion(output1, output2, label)
+                loss = ContrastiveLoss()(output1, output2, label)
                 val_loss += loss.item()
 
                 distances = torch.nn.functional.pairwise_distance(output1, output2)
@@ -443,12 +440,14 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
         if patience_counter >= early_stopping_patience:
             print(f"Early stopping at epoch {epoch + 1}")
             break
+
     total_training_time = time.time() - training_start_time
     print(f"Total training time: {total_training_time:.2f} seconds")
     writer.add_scalar("Time/total_training_time_sec", total_training_time)
     writer.close()
 
     return model, val_transform, device
+
 
 
 def extract_embeddings(model, transform, device, database_folders, save_folder, embedding_dim=256, encoder_type="basic"):
