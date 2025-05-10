@@ -199,7 +199,7 @@ class SiameseNetwork(nn.Module):
 
     def forward_once(self, x):
         x = self.cnn(x)
-        # x = nn.functional.normalize(x, p=2, dim=1)
+        x = nn.functional.normalize(x, p=2, dim=1)
         if self.head:
             x = self.head(x)
         return x
@@ -254,16 +254,6 @@ class ContrastiveLoss(nn.Module):
         loss = 0.5 * (label * distances.pow(2) + (1 - label) * torch.clamp(self.margin - distances, min=0.0).pow(2))
         return loss.mean()
 
-class MobileNetEmbedding(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.model = models.mobilenet_v2(pretrained=True)
-        self.pool = nn.AdaptiveAvgPool2d((1, 1))
-
-    def forward(self, x):
-        x = self.model.features(x)
-        x = self.pool(x)
-        return torch.flatten(x, 1)
 
 
 def build_encoder(encoder_type, embedding_dim, encoder_path, device):
@@ -285,14 +275,14 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
         return encoder
 
     elif encoder_type == "mobilenet":
-        # model = models.mobilenet_v2(pretrained=True)
-        # encoder = nn.Sequential(
-        #     model.features,
-        #     nn.AdaptiveAvgPool2d((1, 1)),
-        #     nn.Flatten(),
-        #     # nn.Linear(model.last_channel, embedding_dim)
-        # )
-        return MobileNetEmbedding()
+        model = models.mobilenet_v2(pretrained=True)
+        encoder = nn.Sequential(
+            model.features,
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            # nn.Linear(model.last_channel, embedding_dim)
+        )
+        return encoder
 
     elif encoder_type == "efficientnet":
         model = models.efficientnet_b0(pretrained=True)
