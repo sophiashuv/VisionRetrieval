@@ -275,7 +275,8 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
         return encoder
 
     elif encoder_type == "mobilenet":
-        model = models.mobilenet_v2(pretrained=True)
+        model = models.mobilenet_v3_large(pretrained=True)
+
         encoder = nn.Sequential(
             model.features,
             nn.AdaptiveAvgPool2d((1, 1)),
