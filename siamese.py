@@ -338,6 +338,7 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
         datasets_list = [datasets.ImageFolder(root=folder) for folder in database_folders]
         concat_dataset = ConcatDataset(datasets_list)
         full_dataset = SiameseDataset(concat_dataset, transform=train_transform)
+    print(f"Total dataset size: {len(full_dataset)} samples")
 
     val_size = int(0.2 * len(full_dataset))
     train_size = len(full_dataset) - val_size
