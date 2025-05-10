@@ -487,8 +487,9 @@ def extract_embeddings(model, transform, device, database_folders, save_folder, 
 
     embeddings = np.array(embeddings, dtype=np.float32)
 
-    index = faiss.IndexFlatIP(embeddings.shape[1])
-    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+    # index = faiss.IndexFlatIP(embeddings.shape[1])
+    # embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+    index = faiss.IndexFlatL2(embeddings.shape[1])
     index.add(embeddings)
 
     faiss.write_index(index, os.path.join(save_folder, f"siamese_{encoder_type}_faiss.index"))
