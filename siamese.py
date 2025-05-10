@@ -370,8 +370,8 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
     for param in model.cnn.parameters():
         param.requires_grad = False
 
-    # optimizer = optim.Adam(model.head.parameters(), lr=learning_rate)
-    # scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=3, factor=0.5, verbose=True)
+    optimizer = optim.Adam(model.cnn.parameters(), lr=learning_rate * 0.1)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=3, factor=0.5, verbose=True)
 
     log_dir = os.path.join(save_folder, f"siamese_tensorboard_{encoder_type}")
     writer = SummaryWriter(log_dir=log_dir)
@@ -425,7 +425,7 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
 
         avg_val_loss = val_loss / len(val_loader)
         accuracy = correct / total
-        # scheduler.step(avg_val_loss)
+        scheduler.step(avg_val_loss)
         current_lr = optimizer.param_groups[0]['lr']
 
         print(f"Epoch [{epoch + 1}/{num_epochs}] | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Val Acc: {accuracy:.4f}")
