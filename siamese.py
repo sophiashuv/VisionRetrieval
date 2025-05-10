@@ -367,8 +367,8 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
                            encoder_output_dim=encoder_output_dim).to(device)
 
     # Freeze encoder initially
-    for param in model.cnn.parameters():
-        param.requires_grad = False
+    # for param in model.cnn.parameters():
+    #     param.requires_grad = False
 
     optimizer = optim.Adam(model.cnn.parameters(), lr=learning_rate * 0.1)
     scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=3, factor=0.5, verbose=True)
@@ -381,17 +381,17 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
     best_model_path = os.path.join(save_folder, f"siamese_{encoder_type}.pth")
     training_start_time = time.time()
 
-    freeze_epochs = 10
+    # freeze_epochs = 10
 
     for epoch in range(num_epochs):
-        if epoch == freeze_epochs:
-            print("\nUnfreezing encoder for fine-tuning\n")
-            for param in model.cnn.parameters():
-                param.requires_grad = True
-            optimizer = optim.Adam([
-                # {'params': model.head.parameters(), 'lr': learning_rate},
-                {'params': model.cnn.parameters(), 'lr': learning_rate * 0.1}
-            ])
+        # if epoch == freeze_epochs:
+        #     print("\nUnfreezing encoder for fine-tuning\n")
+        #     for param in model.cnn.parameters():
+        #         param.requires_grad = True
+        #     optimizer = optim.Adam([
+        #         # {'params': model.head.parameters(), 'lr': learning_rate},
+        #         {'params': model.cnn.parameters(), 'lr': learning_rate * 0.1}
+        #     ])
 
         model.train()
         train_loss = 0
