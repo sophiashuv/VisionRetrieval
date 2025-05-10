@@ -312,7 +312,7 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
 
 
 def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_epochs=20, batch_size=16,
-                          learning_rate=0.001, encoder_type="basic", encoder_path=None,
+                          learning_rate=0.0001, encoder_type="basic", encoder_path=None,
                           early_stopping_patience=5, use_clip_loader=False, use_pair_csv_loader=False):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
