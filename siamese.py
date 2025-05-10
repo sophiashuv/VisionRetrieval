@@ -364,7 +364,7 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
     model = SiameseNetwork(encoder=encoder, embedding_dim=embedding_dim, use_head=use_head,
                            encoder_output_dim=encoder_output_dim).to(device)
 
-    optimizer = optim.Adam(model.cnn.parameters(), lr=learning_rate * 0.1)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=3, factor=0.5, verbose=True)
 
     log_dir = os.path.join(save_folder, f"siamese_tensorboard_{encoder_type}")
