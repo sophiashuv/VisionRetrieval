@@ -136,7 +136,6 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
         siamese_model = SiameseNetwork(encoder=encoder, embedding_dim=embedding_dim, use_head=use_head,
                                encoder_output_dim=encoder_output_dim).to(device)
 
-
         siamese_model.load_state_dict(torch.load(os.path.join(database_folder, f"{method}.pth"), map_location=device))
         siamese_model.eval()
         model = siamese_model
@@ -180,7 +179,7 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
                     with torch.no_grad():
                         query_embedding = model.forward_once(image_tensor)
                     query_vector = query_embedding.squeeze().cpu().numpy()
-                    # query_vector = query_vector / np.linalg.norm(query_vector)
+                    query_vector = query_vector / np.linalg.norm(query_vector)
                     query_vector = query_vector.astype(np.float32).reshape(1, -1)
 
                 elif "autoencoder" in method:

@@ -199,15 +199,13 @@ class SiameseNetwork(nn.Module):
 
     def forward_once(self, x):
         x = self.cnn(x)
-        # x = nn.functional.normalize(x, p=2, dim=1)
+        x = nn.functional.normalize(x, p=2, dim=1)
         if self.head:
             x = self.head(x)
         return x
 
     def forward(self, x1, x2):
         return self.forward_once(x1), self.forward_once(x2)
-
-
 
 
 # class BetterEncoder(nn.Module):
@@ -314,10 +312,6 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
         raise ValueError(f"Unknown encoder type: {encoder_type}")
 
 
-# (Omitting unchanged imports and classes for brevity)
-
-# Modify train_siamese_network to freeze encoder for a few epochs, then unfreeze it
-
 def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_epochs=20, batch_size=16,
                           learning_rate=0.001, encoder_type="basic", encoder_path=None,
                           early_stopping_patience=5, use_clip_loader=False, use_pair_csv_loader=False):
@@ -368,7 +362,7 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
     else:
         encoder_output_dim = embedding_dim
 
-    use_head = True
+    use_head = False
     model = SiameseNetwork(encoder=encoder, embedding_dim=embedding_dim, use_head=use_head,
                            encoder_output_dim=encoder_output_dim).to(device)
 
@@ -493,9 +487,8 @@ def extract_embeddings(model, transform, device, database_folders, save_folder, 
 
     embeddings = np.array(embeddings, dtype=np.float32)
 
-    # index = faiss.IndexFlatIP(embeddings.shape[1])
-    # embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-    index = faiss.IndexFlatL2(embeddings.shape[1])
+    index = faiss.IndexFlatIP(embeddings.shape[1])
+    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
     index.add(embeddings)
 
     faiss.write_index(index, os.path.join(save_folder, f"siamese_{encoder_type}_faiss.index"))
