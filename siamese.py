@@ -457,7 +457,7 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
         if patience_counter >= early_stopping_patience:
             print(f"Early stopping at epoch {epoch + 1}")
             break
-
+    torch.save(model.state_dict(), best_model_path)
     total_training_time = time.time() - training_start_time
     print(f"Total training time: {total_training_time:.2f} seconds")
     writer.add_scalar("Time/total_training_time_sec", total_training_time)
