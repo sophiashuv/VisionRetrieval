@@ -85,7 +85,7 @@ class UnlabeledCLIPSiameseDataset(Dataset):
         return np.array(embeddings)
 
     def __len__(self):
-        return len(self.image_paths) * 2  # one positive and one negative per anchor
+        return len(self.image_paths) * 2
 
     def __getitem__(self, index):
         real_idx = index // 2
@@ -94,7 +94,6 @@ class UnlabeledCLIPSiameseDataset(Dataset):
         anchor_path = self.image_paths[real_idx]
         similarities = self.similarity_matrix[real_idx]
 
-        # Sort by similarity (descending)
         sorted_indices = np.argsort(-similarities)
 
         if is_positive:
@@ -255,7 +254,6 @@ class ContrastiveLoss(nn.Module):
         return loss.mean()
 
 
-
 def build_encoder(encoder_type, embedding_dim, encoder_path, device):
     if "autoencoder" in encoder_type:
         _, encoder = encoder_type.split("_")
@@ -265,7 +263,7 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
         return autoencoder.encoder
 
     elif encoder_type == "resnet":
-        model = models.resnet18(pretrained=True)
+        model = models.resnet50(pretrained=True)
         modules = list(model.children())[:-1]
         encoder = nn.Sequential(
             *modules,
@@ -309,7 +307,6 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
 
     elif encoder_type == "better":
         return BetterEncoder(embedding_dim=embedding_dim)
-
     else:
         raise ValueError(f"Unknown encoder type: {encoder_type}")
 
@@ -353,8 +350,7 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
     val_loader = DataLoader(val_dataset, shuffle=False, batch_size=batch_size)
 
     encoder = build_encoder(encoder_type, embedding_dim, encoder_path, device)
-    use_head = True
-    # Determine output dimension from encoder type
+
     if encoder_type == "mobilenet":
         encoder_output_dim = 1280
     elif encoder_type == "resnet":
@@ -364,13 +360,9 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
     else:
         encoder_output_dim = embedding_dim
 
-    use_head = False
+    use_head = encoder_type in ["basic", "better"]
     model = SiameseNetwork(encoder=encoder, embedding_dim=embedding_dim, use_head=use_head,
                            encoder_output_dim=encoder_output_dim).to(device)
-
-    # Freeze encoder initially
-    # for param in model.cnn.parameters():
-    #     param.requires_grad = False
 
     optimizer = optim.Adam(model.cnn.parameters(), lr=learning_rate * 0.1)
     scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=3, factor=0.5, verbose=True)
@@ -383,18 +375,7 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
     best_model_path = os.path.join(save_folder, f"siamese_{encoder_type}.pth")
     training_start_time = time.time()
 
-    # freeze_epochs = 10
-
     for epoch in range(num_epochs):
-        # if epoch == freeze_epochs:
-        #     print("\nUnfreezing encoder for fine-tuning\n")
-        #     for param in model.cnn.parameters():
-        #         param.requires_grad = True
-        #     optimizer = optim.Adam([
-        #         # {'params': model.head.parameters(), 'lr': learning_rate},
-        #         {'params': model.cnn.parameters(), 'lr': learning_rate * 0.1}
-        #     ])
-
         model.train()
         train_loss = 0
         for img1, img2, label in train_loader:
@@ -457,7 +438,6 @@ def train_siamese_network(database_folders, save_folder, embedding_dim=256, num_
     return model, val_transform, device
 
 
-
 def extract_embeddings(model, transform, device, database_folders, save_folder, embedding_dim=256, encoder_type="basic"):
     start_time = time.time()
     model.eval()
@@ -491,7 +471,6 @@ def extract_embeddings(model, transform, device, database_folders, save_folder, 
 
     index = faiss.IndexFlatIP(embeddings.shape[1])
     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-    # index = faiss.IndexFlatL2(embeddings.shape[1])
     index.add(embeddings)
 
     faiss.write_index(index, os.path.join(save_folder, f"siamese_{encoder_type}_faiss.index"))
