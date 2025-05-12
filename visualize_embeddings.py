@@ -1,5 +1,3 @@
-# visualize_embeddings.py
-
 import argparse
 import os
 import torch
@@ -23,34 +21,36 @@ SUPPORTED_METHODS = [
     "siamese_autoencoder_mobilenet", "siamese_autoencoder_efficientnet", "siamese_better"
 ]
 
-
 def load_model(method, database_folder, embedding_dim, device):
     model_path = os.path.join(database_folder, f"{method}.pth")
 
     if "siamese" in method:
         encoder_type = method.split("_")[-1]
         encoder = build_encoder(encoder_type, embedding_dim, None, device)
+        use_head = encoder_type in ["basic", "better"]
+        encoder_output_dim = 1280 if encoder_type in ["mobilenet", "efficientnet"] else 512 if encoder_type == "resnet" else embedding_dim
+        model = SiameseNetwork(encoder=encoder, embedding_dim=embedding_dim, use_head=use_head, encoder_output_dim=encoder_output_dim).to(device)
         if not os.path.exists(model_path):
             return None, None
-        model = SiameseNetwork(encoder=encoder, embedding_dim=embedding_dim).to(device)
         model.load_state_dict(torch.load(model_path, map_location=device))
+        model.eval()
         transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                 std=[0.229, 0.224, 0.225])
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
     elif "autoencoder" in method:
-        # Split to get encoder type (e.g., autoencoder_resnet)
         encoder_type = "_".join(method.split("_")[1:])
+        model = Autoencoder(embedding_dim=embedding_dim, encoder_type=encoder_type).to(device)
         if not os.path.exists(model_path):
             return None, None
-        model = Autoencoder(embedding_dim=embedding_dim, encoder_type=encoder_type).to(device)
         model.load_state_dict(torch.load(model_path, map_location=device))
+        model.eval()
         transform = transforms.Compose([
             transforms.Resize((224, 224)),
-            transforms.ToTensor()
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
     elif method in ["dhash", "phash"]:
@@ -66,30 +66,29 @@ def load_model(method, database_folder, embedding_dim, device):
 
     return model, transform
 
-
 def get_embedding(file_path, method, model, transform, device):
     if "siamese" in method:
         image = Image.open(file_path).convert("RGB")
         image_tensor = transform(image).unsqueeze(0).to(device)
         with torch.no_grad():
             emb = model.forward_once(image_tensor)
-        return emb.squeeze().cpu().numpy()
+        emb = emb.squeeze().cpu().numpy()
     elif "autoencoder" in method:
         image = Image.open(file_path).convert("RGB")
         image_tensor = transform(image).unsqueeze(0).to(device)
         with torch.no_grad():
-            emb, _ = model(image_tensor)
-        return emb.squeeze().cpu().numpy()
+            emb, _ = model(image_tensor, current_epoch=999)
+        emb = emb.squeeze().cpu().numpy()
     elif method in ["dhash", "phash"]:
         import cv2
         image = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
         hash_func = dhash if method == "dhash" else phash
-        return hash_to_bitvector(hash_func(image))
+        emb = hash_to_bitvector(hash_func(image))
     elif "pretrained" in method:
-        return extract_features(file_path, model, transform, device)
+        emb = extract_features(file_path, model, transform, device)
     else:
         raise ValueError("Unsupported method.")
-
+    return emb
 
 def collect_embeddings(query_folder, model, method, transform, device):
     embeddings, labels = [], []
@@ -109,7 +108,6 @@ def collect_embeddings(query_folder, model, method, transform, device):
                 print(f"[{method}] Error processing {file_path}: {e}")
     return np.array(embeddings), labels
 
-
 def plot_pca_3d(embeddings, labels, method_name, save_folder):
     pca = PCA(n_components=3)
     reduced = pca.fit_transform(embeddings)
@@ -122,7 +120,6 @@ def plot_pca_3d(embeddings, labels, method_name, save_folder):
     ax = fig.add_subplot(111, projection='3d')
     scatter = ax.scatter(reduced[:, 0], reduced[:, 1], reduced[:, 2], c=colors, cmap='tab10', alpha=0.7)
 
-    # Legend
     handles = [plt.Line2D([0], [0], marker='o', color='w', label=label,
                           markerfacecolor=plt.cm.tab10(i / len(label_set)), markersize=10)
                for i, label in enumerate(label_set)]
@@ -138,7 +135,6 @@ def plot_pca_3d(embeddings, labels, method_name, save_folder):
     plt.savefig(save_path)
     print(f"[{method_name}] PCA plot saved to {save_path}")
     plt.close()
-
 
 def main():
     parser = argparse.ArgumentParser(description="Visualize embeddings for all available methods with PCA.")
@@ -165,7 +161,6 @@ def main():
             plot_pca_3d(embeddings, labels, method, args.save_folder)
         except Exception as e:
             print(f"[{method}] Failed with error: {e}")
-
 
 if __name__ == "__main__":
     main()
