@@ -187,7 +187,7 @@ class Autoencoder(nn.Module):
 
 
 def train_autoencoder(database_folders, save_folder, num_epochs=20, batch_size=16, embedding_dim=256,
-                      encoder_type="basic", early_stopping_patience=5):
+                      encoder_type="basic", early_stopping_patience=5, lr=0.0001):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     transform = transforms.Compose([
@@ -199,7 +199,7 @@ def train_autoencoder(database_folders, save_folder, num_epochs=20, batch_size=1
     autoencoder = Autoencoder(embedding_dim, encoder_type).to(device)
     print(f"Total trainable parameters: {sum(p.numel() for p in autoencoder.parameters() if p.requires_grad):,}")
     criterion = nn.MSELoss(reduction='mean')
-    optimizer = optim.Adam(autoencoder.parameters(), lr=0.001)
+    optimizer = optim.Adam(autoencoder.parameters(), lr=lr)
     scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=3, factor=0.5, verbose=True)
 
     datasets_list = [datasets.ImageFolder(root=folder, transform=transform) for folder in database_folders]
@@ -375,6 +375,7 @@ if __name__ == "__main__":
     parser.add_argument("--embedding_dim", type=int, default=256, help="Size of embedding vector")
     parser.add_argument("--es_patience", type=int, default=5, help="Number of epochs to wait before early stopping")
     parser.add_argument("--test_folder", nargs='+', help="Path to test images.")
+    parser.add_argument("--learning_rate", type=float, default=0.0005)
     args = parser.parse_args()
 
     ensure_subfolder_exists(args.base_folders)
@@ -386,7 +387,8 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         embedding_dim=args.embedding_dim,
         encoder_type=args.encoder_type,
-        early_stopping_patience=args.es_patience
+        early_stopping_patience=args.es_patience,
+        lr=args.learning_rate
     )
     if args.test_folder:
         extract_embeddings(autoencoder,
