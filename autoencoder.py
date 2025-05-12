@@ -91,7 +91,7 @@ class Autoencoder(nn.Module):
                 nn.ConvTranspose2d(64, 32, 3, stride=2, padding=1, output_padding=1),
                 nn.ReLU(),
                 nn.ConvTranspose2d(32, 3, 3, stride=2, padding=1, output_padding=1),
-                nn.Sigmoid()
+                # nn.Sigmoid()
             )
 
         elif encoder_type == "better":
@@ -113,7 +113,7 @@ class Autoencoder(nn.Module):
                 nn.ReLU(),
                 nn.Upsample(scale_factor=2, mode='nearest'),
                 nn.ConvTranspose2d(32, 3, 3, stride=1, padding=1),
-                nn.Sigmoid()
+                # nn.Sigmoid()
             )
 
         elif encoder_type in ["resnet", "mobilenet", "efficientnet"]:
@@ -158,7 +158,7 @@ class Autoencoder(nn.Module):
                 nn.ReLU(),
                 nn.Upsample(scale_factor=2, mode='nearest'),
                 nn.ConvTranspose2d(32, 3, 3, stride=1, padding=1),
-                nn.Sigmoid()
+                # nn.Sigmoid()
             )
 
         else:
