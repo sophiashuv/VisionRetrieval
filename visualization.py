@@ -7,25 +7,26 @@ import random
 import pandas as pd
 
 
-def plot_retrieval(query_image_path, query_class, top5_paths, method, model, output_path, idx):
+def plot_retrieval(query_image_path, query_class, top5_paths, method, output_path, idx):
     fig, axs = plt.subplots(1, 6, figsize=(18, 4))
     plt.tight_layout()
 
-    query_img = cv2.imread(query_image_path, cv2.IMREAD_GRAYSCALE)
-    axs[0].imshow(query_img, cmap='gray')
+    query_img = cv2.imread(query_image_path)
+    query_img = cv2.cvtColor(query_img, cv2.COLOR_BGR2RGB)
+    axs[0].imshow(query_img)
     axs[0].set_title(f"Query\n(Class {query_class})")
     axs[0].axis('off')
 
     for i, path in enumerate(top5_paths):
-        retrieved_img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+        retrieved_img = cv2.imread(path)
+        retrieved_img = cv2.cvtColor(retrieved_img, cv2.COLOR_BGR2RGB)
         retrieved_class = os.path.basename(os.path.dirname(path))
-        axs[i + 1].imshow(retrieved_img, cmap='gray')
+        axs[i + 1].imshow(retrieved_img)
         axs[i + 1].set_title(f"Top {i + 1}\n(Class {retrieved_class})")
         axs[i + 1].axis('off')
-
-    model_suffix = model if model != "N/A" else "none"
-    filename = f"{method}_{model_suffix}_viz_{idx + 1}.png"
-    plt.suptitle(f"Method: {method} | Model: {model_suffix}", fontsize=14)
+    method = method.replace("better", "advanced")
+    filename = f"{method}_viz_{idx + 1}.png"
+    plt.suptitle(f"Method: {method}", fontsize=14)
     plt.savefig(os.path.join(output_path, filename))
     plt.close()
 
@@ -48,10 +49,9 @@ def visualize_retrievals(json_path, query_root, output_folder, n_samples=5):
         query_image_path = os.path.join(query_root, query_class, entry["filename"])
         top5_paths = entry["top_5"]
         method = entry["method"]
-        model = entry.get("model", "none")
 
         if os.path.exists(query_image_path) and all(os.path.exists(p) for p in top5_paths):
-            plot_retrieval(query_image_path, query_class, top5_paths, method, model, output_folder, idx)
+            plot_retrieval(query_image_path, query_class, top5_paths, method, output_folder, idx)
 
     print(f"Saved {len(sampled_entries)} visualizations to: {output_folder}")
 
