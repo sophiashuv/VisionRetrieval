@@ -8,7 +8,7 @@ import pandas as pd
 
 
 def plot_retrieval(query_image_path, query_class, top5_paths, method, output_path, idx):
-    fig, axs = plt.subplots(1, 6, figsize=(18, 4))
+    fig, axs = plt.subplots(1, 5, figsize=(18, 4))
     plt.tight_layout()
 
     query_img = cv2.imread(query_image_path)
@@ -24,6 +24,7 @@ def plot_retrieval(query_image_path, query_class, top5_paths, method, output_pat
         axs[i + 1].imshow(retrieved_img)
         axs[i + 1].set_title(f"Top {i + 1}\n(Class {retrieved_class})")
         axs[i + 1].axis('off')
+
     method = method.replace("better", "advanced")
     filename = f"{method}_viz_{idx + 1}.png"
     plt.suptitle(f"Method: {method}", fontsize=14)
@@ -39,7 +40,7 @@ def visualize_retrievals(json_path, query_root, output_folder, n_samples=5):
 
     valid_entries = [
         entry for entry in data
-        if "top_5" in entry and len(entry["top_5"]) == 5
+        if "top_5" in entry and len(entry["top_5"]) == 4
     ]
 
     sampled_entries = random.sample(valid_entries, min(n_samples, len(valid_entries)))
