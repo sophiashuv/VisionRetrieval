@@ -122,7 +122,7 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
 
         models = method.split("_")
         encoder = build_encoder(models[-1], embedding_dim, None, device)
-        use_head = models[-1] in ["basic", "better"] and models[-1] != "autoencoder"
+        use_head = models[-1] in ["basic", "better"] and models[1] != "autoencoder"
         if models[-1] == "mobilenet":
             encoder_output_dim = 1280
         elif models[-1] == "resnet":
