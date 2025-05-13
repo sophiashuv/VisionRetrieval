@@ -512,6 +512,7 @@ if __name__ == "__main__":
     extract_parser.add_argument("--base_folders", nargs='+', required=True)
     extract_parser.add_argument("--save_folder", required=True)
     extract_parser.add_argument("--encoder_type", type=str, required=True)
+    extract_parser.add_argument("--model_path", required=True)
     extract_parser.add_argument("--encoder_path", required=True)
     extract_parser.add_argument("--embedding_dim", type=int, default=256)
 
@@ -563,7 +564,7 @@ if __name__ == "__main__":
         ])
         encoder = build_encoder(args.encoder_type, args.embedding_dim, args.encoder_path, device)
         model = SiameseNetwork(encoder=encoder, embedding_dim=args.embedding_dim).to(device)
-        model.load_state_dict(torch.load(args.encoder_path, map_location=device))
+        model.load_state_dict(torch.load(args.model_path, map_location=device))
 
         extract_embeddings(
             model=model,
