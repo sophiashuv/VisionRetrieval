@@ -258,7 +258,8 @@ def build_encoder(encoder_type, embedding_dim, encoder_path, device):
     if "autoencoder" in encoder_type:
         _, encoder = encoder_type.split("_")
         autoencoder = Autoencoder(embedding_dim=embedding_dim, encoder_type=encoder).to(device)
-        autoencoder.load_state_dict(torch.load(encoder_path, map_location=device))
+        if encoder_path:
+            autoencoder.load_state_dict(torch.load(encoder_path, map_location=device))
         autoencoder.eval()
         return autoencoder.encoder
 
