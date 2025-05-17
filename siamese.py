@@ -198,9 +198,9 @@ class SiameseNetwork(nn.Module):
 
     def forward_once(self, x):
         x = self.cnn(x)
-        x = nn.functional.normalize(x, p=2, dim=1)
         if self.head:
             x = self.head(x)
+        x = nn.functional.normalize(x, p=2, dim=1)
         return x
 
     def forward(self, x1, x2):
