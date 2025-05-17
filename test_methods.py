@@ -199,6 +199,9 @@ def evaluate_retrieval(query_folder, database_folder, save_folder, method, embed
                     query_vector = query_vector.astype(np.float32).reshape(1, -1)
 
                 distances, indices = index.search(query_vector, 6)
+                print("Indices:", indices[0])
+                print("Are indices unique?", len(indices[0]) == len(set(indices[0])))
+
                 retrieved_paths = metadata.iloc[indices[0]]['image_path'].tolist()
                 query_basename = os.path.basename(filename)
                 top_5 = [p for p in retrieved_paths if os.path.basename(p) != query_basename]
