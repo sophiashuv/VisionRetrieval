@@ -376,33 +376,64 @@ if __name__ == "__main__":
     parser.add_argument("--es_patience", type=int, default=5, help="Number of epochs to wait before early stopping")
     parser.add_argument("--test_folder", nargs='+', help="Path to test images.")
     parser.add_argument("--learning_rate", type=float, default=0.0005)
+    parser.add_argument("--only_extract", action="store_true", help="Only extract embeddings without training.")
+    parser.add_argument("--model_path", type=str, help="Path to pretrained model for embedding extraction.")
+
     args = parser.parse_args()
 
-    ensure_subfolder_exists(args.base_folders)
+    if args.only_extract:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Running in embedding extraction mode only on device: {device}")
 
-    autoencoder, transform, device = train_autoencoder(
-        database_folders=args.base_folders,
-        save_folder=args.save_folder,
-        num_epochs=args.num_epochs,
-        batch_size=args.batch_size,
-        embedding_dim=args.embedding_dim,
-        encoder_type=args.encoder_type,
-        early_stopping_patience=args.es_patience,
-        lr=args.learning_rate
-    )
-    if args.test_folder:
-        extract_embeddings(autoencoder,
-                           transform,
-                           device,
-                           args.test_folder,
-                           args.save_folder,
-                           args.embedding_dim,
-                           args.encoder_type)
+        # Create model and load weights
+        autoencoder = Autoencoder(args.embedding_dim, args.encoder_type).to(device)
+        if args.model_path is None:
+            raise ValueError("Please specify --model_path when using --only_extract")
+        autoencoder.load_state_dict(torch.load(args.model_path, map_location=device))
+        autoencoder.eval()
+
+        # Define transform
+        transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+
+        extract_embeddings(
+            autoencoder,
+            transform,
+            device,
+            args.test_folder if args.test_folder else args.base_folders,
+            args.save_folder,
+            args.embedding_dim,
+            args.encoder_type
+        )
     else:
-        extract_embeddings(autoencoder,
-                           transform,
-                           device,
-                           args.base_folders,
-                           args.save_folder,
-                           args.embedding_dim,
-                           args.encoder_type)
+        ensure_subfolder_exists(args.base_folders)
+
+        autoencoder, transform, device = train_autoencoder(
+            database_folders=args.base_folders,
+            save_folder=args.save_folder,
+            num_epochs=args.num_epochs,
+            batch_size=args.batch_size,
+            embedding_dim=args.embedding_dim,
+            encoder_type=args.encoder_type,
+            early_stopping_patience=args.es_patience,
+            lr=args.learning_rate
+        )
+        if args.test_folder:
+            extract_embeddings(autoencoder,
+                               transform,
+                               device,
+                               args.test_folder,
+                               args.save_folder,
+                               args.embedding_dim,
+                               args.encoder_type)
+        else:
+            extract_embeddings(autoencoder,
+                               transform,
+                               device,
+                               args.base_folders,
+                               args.save_folder,
+                               args.embedding_dim,
+                               args.encoder_type)
